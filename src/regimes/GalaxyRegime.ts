@@ -9,7 +9,8 @@ import { radialGlow } from '../render/Glow';
 import { BlackHole } from '../render/BlackHole';
 import { Body } from '../core/Gravity';
 import { TelegrapherField } from '../render/Telegrapher';
-import { hawkingSolar, formatSI } from '../core/Closure';
+import { hawkingSolar, scrambling, formatSI } from '../core/Closure';
+import { M_SUN } from '../util/units';
 
 const N_STARS = 6000;
 const R_GAL   = 18;
@@ -431,22 +432,30 @@ export class GalaxyRegime extends Regime {
     const bh = this.bhs[idx];
     if (!bh) return null;
     const h = hawkingSolar(bh.realMassSolar);
+    const s = scrambling(bh.realMassSolar * M_SUN);
     const title = bh.isCentral
       ? 'Supermassive black hole · paper §20'
       : 'Stellar-mass black hole · paper §20';
+    // Format t_scr in human-readable units depending on magnitude
+    const t_scr_str =
+      s.t_scr < 1     ? formatSI(s.t_scr, 's', 2)
+    : s.t_scr < 3600  ? `${s.t_scr.toFixed(1)} s`
+    : s.t_scr < 86400 ? `${(s.t_scr / 3600).toFixed(1)} hr`
+    : s.t_scr < 3.156e7 ? `${(s.t_scr / 86400).toFixed(1)} day`
+    : `${(s.t_scr / 3.156e7).toFixed(1)} yr`;
     return {
       title,
       rows: [
         { k: 'M',      v: `${bh.realMassSolar.toExponential(2)} M☉` },
         { k: 'r_s',    v: formatSI(h.rs, 'm', 2) },
-        { k: 'A',      v: formatSI(h.area, 'm²', 2) },
         { k: 'T_H',    v: formatSI(h.T_H, 'K', 2) },
-        { k: 'S_BH',   v: formatSI(h.S_BH, 'J/K', 2) },
+        { k: 'S_BH/k_B', v: formatSI(h.S_BH / 1.380649e-23, '', 2) },
+        { k: 't_scr (Vikram)', v: t_scr_str },
         { k: 't_evap', v: `~${(h.t_evap / 3.156e16 / 1e9).toExponential(1)} Gyr` },
       ],
       note: bh.isCentral
-        ? 'q(r) = 1 − 2GM/c²r → q = 0 at horizon. S_BH = A/4 emerges from ln 2 per face.'
-        : `Collapsed massive star. Same lapse rule N²=q as the SMBH; T_H ∝ 1/M so it runs hotter.`
+        ? 'q(r) = 1 − 2GM/c²r → q = 0 at horizon. S_BH = A/4 from ln 2 per face. Scrambling floor t_scr ≳ βℏ/(2π)·ln(S/k_B) — Vikram, Shou, Galitski PRL 2026.'
+        : 'Collapsed massive star. Same N² = q as the SMBH; T_H ∝ 1/M runs hotter, so t_scr ∝ M·ln M is much shorter.'
     };
   }
 }
