@@ -15,7 +15,16 @@ const N_STARS = 6000;
 const R_GAL   = 18;
 const G_SIM   = 0.0008;
 const A0_SIM  = 0.00010;
-const BH_MASS = 800;
+
+interface BHView {
+  mesh: BlackHole;
+  body: Body;
+  mass: number;          // sim units (sets RAR g_bar around it)
+  realMassSolar: number; // physical mass for hover (T_H, S_BH)
+  isCentral: boolean;
+  diskTiltAxis: THREE.Vector3;
+  diskTiltAngle: number;
+}
 
 interface Star {
   body: Body;
@@ -29,8 +38,7 @@ export class GalaxyRegime extends Regime {
   private points: THREE.Points;
   private posAttr: THREE.BufferAttribute;
   private colAttr: THREE.BufferAttribute;
-  private bh: BlackHole;
-  private bhBody: Body;
+  private bhs: BHView[] = [];
   private spiralMesh: THREE.Mesh;
   private spiralMat: THREE.ShaderMaterial;
   private haloMesh: THREE.Sprite;
@@ -48,12 +56,89 @@ export class GalaxyRegime extends Regime {
 
     const rng = mulberry32(hashStr(`galaxy|${seed}`));
 
-    // Central black hole
-    this.bh = new BlackHole({ radius: 0.32, diskInner: 2.4, diskOuter: 9, diskTilt: 0.55 });
-    this.scene.add(this.bh);
-    this.bhBody = { id: 'bh', pos: [0, 0, 0], vel: [0, 0, 0], mass: BH_MASS, fixed: true };
-    this.bh.userData = { type: 'bh' };
-    this.draggable.add(this.bh);
+    // --- Black holes ---
+    // Central SMBH varies by seed: 85% have one (M ∈ ~5×10⁵..10¹⁰ M☉, log-uniform
+    // → broad range from dwarf to supermassive). 15% galaxies are "quiescent"
+    // and have no visible central BH (dwarf irregulars, some lenticulars).
+    const hasCentral = rng() > 0.15;
+    if (hasCentral) {
+      // Sample log-uniformly so we get a realistic mix of dwarf, milky-way-class,
+      // and M87-class BHs
+      const logM = 5.5 + rng() * 4.0;   // log10(M / M☉) ∈ [5.5, 9.5]
+      const massSolar = Math.pow(10, logM);
+      // Map physical mass to sim units (visible disk size). Use a gentle log scale
+      // so even dwarfs are visible.
+      const simMass = 200 + 2300 * (logM - 5.5) / 4.0;
+      const radius  = 0.20 + 0.40 * (simMass - 200) / 2300;
+      const diskScale = 0.65 + rng() * 0.7;
+      const diskInner = (2.0 + rng() * 1.2) * diskScale;
+      const diskOuter = diskInner + (3.5 + rng() * 5.0);
+      const tilt      = (rng() - 0.5) * Math.PI * 0.8;
+      // Active vs aged: hotter disks for younger SMBHs
+      const active    = rng();
+      const hot   = active > 0.5 ? new THREE.Color('#fff4d8') : new THREE.Color('#ffd0a0');
+      const mid   = active > 0.5 ? new THREE.Color('#ffaa55') : new THREE.Color('#ff8060');
+      const cool  = active > 0.5 ? new THREE.Color('#7ad7ff') : new THREE.Color('#a060ff');
+      const mesh = new BlackHole({
+        radius, diskInner, diskOuter, diskTilt: tilt, hot, mid, cool
+      });
+      // Small central offset so even the "central" BH wanders a bit per seed
+      const cx = (rng() - 0.5) * 1.5;
+      const cz = (rng() - 0.5) * 1.5;
+      mesh.position.set(cx, 0, cz);
+      mesh.userData = { type: 'bh', index: 0 };
+      this.scene.add(mesh);
+      this.draggable.add(mesh);
+      this.bhs.push({
+        mesh,
+        body: { id: 'bh-central', pos: [cx, 0, cz], vel: [0, 0, 0], mass: simMass, fixed: true },
+        mass: simMass,
+        realMassSolar: massSolar,
+        isCentral: true,
+        diskTiltAxis: new THREE.Vector3(1, 0, 0),
+        diskTiltAngle: tilt
+      });
+    }
+
+    // Stellar-mass BHs scattered through the disk (collapsed massive stars,
+    // paper §20 same q→0 mechanism, smaller scale). Visibly hot per Hawking.
+    const nStellar = 2 + Math.floor(rng() * 6);   // 2..7
+    for (let i = 0; i < nStellar; i++) {
+      const r   = 4 + rng() * (R_GAL - 6);
+      const ang = rng() * Math.PI * 2;
+      const x   = r * Math.cos(ang);
+      const z   = r * Math.sin(ang);
+      const y   = (rng() - 0.5) * 0.6;
+      // Stellar BH masses 5..40 M☉ → sim mass small
+      const massSolar = 5 + rng() * 35;
+      const simMass   = 4 + rng() * 16;
+      const radius    = 0.06 + 0.04 * (massSolar / 40);
+      const tilt      = (rng() - 0.5) * Math.PI;
+      // Hotter Hawking glow for smaller BHs (T_H ∝ 1/M)
+      const heat = 1 - (massSolar - 5) / 35;
+      const hot  = new THREE.Color().setRGB(1, 0.85 + 0.15 * heat, 0.65 + 0.35 * heat);
+      const mid  = new THREE.Color().setRGB(1, 0.55 - 0.15 * heat, 0.30 - 0.20 * heat);
+      const cool = new THREE.Color('#ffb060');
+      const mesh = new BlackHole({
+        radius,
+        diskInner: 2.2, diskOuter: 5.5,
+        diskTilt: tilt,
+        hot, mid, cool
+      });
+      mesh.position.set(x, y, z);
+      mesh.userData = { type: 'bh', index: this.bhs.length };
+      this.scene.add(mesh);
+      this.draggable.add(mesh);
+      this.bhs.push({
+        mesh,
+        body: { id: `bh-stellar-${i}`, pos: [x, y, z], vel: [0, 0, 0], mass: simMass, fixed: true },
+        mass: simMass,
+        realMassSolar: massSolar,
+        isCentral: false,
+        diskTiltAxis: new THREE.Vector3(1, 0, 0),
+        diskTiltAngle: tilt
+      });
+    }
 
     // Halo (entanglement overlay)
     this.haloMesh = new THREE.Sprite(new THREE.SpriteMaterial({
@@ -223,9 +308,19 @@ export class GalaxyRegime extends Regime {
     this.scene.add(this.telegrapher.group);
   }
 
+  // Total mass at galactic centre — drives initial circular speeds for star
+  // placement. Stellar-mass BHs are negligible vs. the SMBH at this scale.
+  private centralMass(): number {
+    const central = this.bhs.find(b => b.isCentral);
+    return central?.mass ?? 0;
+  }
+
   private circularSpeed(r: number): number {
-    // RAR-consistent circular speed: v^2 / r = g_obs from central BH at radius r
-    const gBar = G_SIM * BH_MASS / Math.max(r * r, 1e-3);
+    // RAR-consistent circular speed: v² / r = g_obs from central baryonic mass.
+    // If there's no central SMBH, use a soft bulge mass so outer rotation curve
+    // still falls into deep-MOND naturally (paper §14: Tully–Fisher follows).
+    const M = Math.max(this.centralMass(), 60);
+    const gBar = G_SIM * M / Math.max(r * r, 1e-3);
     const y = gBar / A0_SIM;
     const nu = 0.5 + Math.sqrt(0.25 + 1 / Math.max(y, 1e-30));
     const gObs = nu * gBar;
@@ -240,29 +335,32 @@ export class GalaxyRegime extends Regime {
     this.time += visDt;
     this.wallTime += ctx.dtWall;
     this.spiralMat.uniforms.time.value = this.time;
-    this.bh.tick(this.time);
+    for (const b of this.bhs) b.mesh.tick(this.time);
 
-    // Integrate stars under BH gravity using RAR
+    // Integrate stars under combined BH gravity using RAR. Each star feels
+    // every BH in the galaxy (central SMBH + stellar-mass remnants).
     const sub = 2;
     const dtSim = visDt / sub;
     for (let s = 0; s < sub; s++) {
-      // Test-particle approximation: each star only feels the BH
       for (const star of this.stars) {
         if (star.body.fixed) continue;
-        const r = [star.body.pos[0] - this.bhBody.pos[0],
-                   star.body.pos[1] - this.bhBody.pos[1],
-                   star.body.pos[2] - this.bhBody.pos[2]];
-        const r2 = r[0] * r[0] + r[1] * r[1] + r[2] * r[2] + 1e-6;
-        const dist = Math.sqrt(r2);
-        const gBar = G_SIM * BH_MASS / r2;
-        const y    = gBar / A0_SIM;
-        const nu   = 0.5 + Math.sqrt(0.25 + 1 / Math.max(y, 1e-30));
-        const gObs = nu * gBar;
-        const k    = -gObs / dist;
-        // kick-drift-kick (single-body)
-        star.body.vel[0] += dtSim * k * r[0];
-        star.body.vel[1] += dtSim * k * r[1];
-        star.body.vel[2] += dtSim * k * r[2];
+        let ax = 0, ay = 0, az = 0;
+        for (const bh of this.bhs) {
+          const rx = star.body.pos[0] - bh.body.pos[0];
+          const ry = star.body.pos[1] - bh.body.pos[1];
+          const rz = star.body.pos[2] - bh.body.pos[2];
+          const r2 = rx * rx + ry * ry + rz * rz + 1e-3;
+          const dist = Math.sqrt(r2);
+          const gBar = G_SIM * bh.mass / r2;
+          const y    = gBar / A0_SIM;
+          const nu   = 0.5 + Math.sqrt(0.25 + 1 / Math.max(y, 1e-30));
+          const gObs = nu * gBar;
+          const k    = -gObs / dist;
+          ax += k * rx; ay += k * ry; az += k * rz;
+        }
+        star.body.vel[0] += dtSim * ax;
+        star.body.vel[1] += dtSim * ay;
+        star.body.vel[2] += dtSim * az;
         star.body.pos[0] += dtSim * star.body.vel[0];
         star.body.pos[1] += dtSim * star.body.vel[1];
         star.body.pos[2] += dtSim * star.body.vel[2];
@@ -277,10 +375,15 @@ export class GalaxyRegime extends Regime {
     }
     this.posAttr.needsUpdate = true;
 
-    // BH position drag-follow
-    this.bh.position.set(this.bhBody.pos[0], this.bhBody.pos[1], this.bhBody.pos[2]);
-    this.haloMesh.position.copy(this.bh.position);
-    (this.haloMesh.material as THREE.SpriteMaterial).opacity = ctx.entanglementOn ? 0.35 : 0;
+    // BH drag-follow
+    for (const bh of this.bhs) {
+      bh.mesh.position.set(bh.body.pos[0], bh.body.pos[1], bh.body.pos[2]);
+    }
+    // Halo follows the central BH if one exists; otherwise dim halo at origin
+    const central = this.bhs.find(b => b.isCentral);
+    this.haloMesh.position.copy(central ? central.mesh.position : new THREE.Vector3());
+    (this.haloMesh.material as THREE.SpriteMaterial).opacity =
+      ctx.entanglementOn ? (central ? 0.35 : 0.18) : 0;
     this.fieldLines.visible = ctx.entanglementOn;
     this.flMaterial.opacity = ctx.entanglementOn ? 0.4 : 0;
 
@@ -298,45 +401,52 @@ export class GalaxyRegime extends Regime {
   }
 
   pick(intersection: THREE.Intersection): DragTarget | null {
-    const obj = intersection.object;
-    const ud = obj.userData;
-    if (ud?.type === 'bh') {
-      const body = this.bhBody;
-      return {
-        id: 'bh',
-        object: this.bh,
-        worldPos: new THREE.Vector3().copy(this.bh.position),
-        onDragMove: (p) => {
-          body.pos[0] = p.x; body.pos[1] = p.y; body.pos[2] = p.z;
-        },
-        onDragEnd: (_v) => {
-          body.vel[0] = body.vel[1] = body.vel[2] = 0;
-          // Disturbing a defect launches a telegrapher front through the substrate
-          this.telegrapher.emit(this.bh.position.clone(), R_GAL * 2.2, 1.0);
-        }
-      };
-    }
-    return null;
+    // Walk up the ancestor chain — the user clicks the disk/horizon/ring
+    // sub-mesh, but only the BlackHole group has the {type:'bh', index} userData.
+    let obj: THREE.Object3D | null = intersection.object;
+    while (obj && obj.userData?.type !== 'bh') obj = obj.parent;
+    if (!obj) return null;
+    const idx = obj.userData.index as number;
+    const bh = this.bhs[idx];
+    if (!bh) return null;
+    return {
+      id: bh.body.id,
+      object: bh.mesh,
+      worldPos: new THREE.Vector3().copy(bh.mesh.position),
+      onDragMove: (p) => {
+        bh.body.pos[0] = p.x; bh.body.pos[1] = p.y; bh.body.pos[2] = p.z;
+      },
+      onDragEnd: (_v) => {
+        bh.body.vel[0] = bh.body.vel[1] = bh.body.vel[2] = 0;
+        this.telegrapher.emit(bh.mesh.position.clone(), R_GAL * 2.2, 1.0);
+      }
+    };
   }
 
   hoverInfo(intersection: THREE.Intersection): HoverInfo | null {
-    const ud = intersection.object.userData;
-    if (ud?.type !== 'bh') return null;
-    // Map sim BH_MASS to a physical galactic SMBH (~4e6 M_sun like Sgr A*).
-    // The sim BH mass is dimensionless; map it to a fiducial Sgr A*-class value.
-    const m_solar = 4.15e6;
-    const h = hawkingSolar(m_solar);
+    let obj: THREE.Object3D | null = intersection.object;
+    while (obj && obj.userData?.type !== 'bh') obj = obj.parent;
+    if (!obj) return null;
+    const idx = obj.userData.index as number;
+    const bh = this.bhs[idx];
+    if (!bh) return null;
+    const h = hawkingSolar(bh.realMassSolar);
+    const title = bh.isCentral
+      ? 'Supermassive black hole · paper §20'
+      : 'Stellar-mass black hole · paper §20';
     return {
-      title: 'Supermassive black hole · paper §20',
+      title,
       rows: [
-        { k: 'M',     v: `${m_solar.toExponential(2)} M☉` },
-        { k: 'r_s',   v: formatSI(h.rs, 'm', 2) },
-        { k: 'A',     v: formatSI(h.area, 'm²', 2) },
-        { k: 'T_H',   v: formatSI(h.T_H, 'K', 2) },
-        { k: 'S_BH',  v: formatSI(h.S_BH, 'J/K', 2) },
+        { k: 'M',      v: `${bh.realMassSolar.toExponential(2)} M☉` },
+        { k: 'r_s',    v: formatSI(h.rs, 'm', 2) },
+        { k: 'A',      v: formatSI(h.area, 'm²', 2) },
+        { k: 'T_H',    v: formatSI(h.T_H, 'K', 2) },
+        { k: 'S_BH',   v: formatSI(h.S_BH, 'J/K', 2) },
         { k: 't_evap', v: `~${(h.t_evap / 3.156e16 / 1e9).toExponential(1)} Gyr` },
       ],
-      note: 'q(r) = 1 − 2GM/c²r → q = 0 at horizon. S_BH = A/4 emerges from ln 2 per face.'
+      note: bh.isCentral
+        ? 'q(r) = 1 − 2GM/c²r → q = 0 at horizon. S_BH = A/4 emerges from ln 2 per face.'
+        : `Collapsed massive star. Same lapse rule N²=q as the SMBH; T_H ∝ 1/M so it runs hotter.`
     };
   }
 }

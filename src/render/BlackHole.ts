@@ -8,6 +8,9 @@ export interface BlackHoleOptions {
   diskInner?: number;   // *radius
   diskOuter?: number;   // *radius
   diskTilt?: number;    // radians around X axis
+  hot?:  THREE.Color;   // inner-disk colour (hottest)
+  mid?:  THREE.Color;   // mid-disk
+  cool?: THREE.Color;   // outer-disk
 }
 
 export class BlackHole extends THREE.Group {
@@ -65,9 +68,9 @@ export class BlackHole extends THREE.Group {
       time:   { value: 0 },
       inner:  { value: ri },
       outer:  { value: ro },
-      hot:    { value: new THREE.Color('#fff4d8') },
-      mid:    { value: new THREE.Color('#ffaa55') },
-      cool:   { value: new THREE.Color('#7ad7ff') }
+      hot:    { value: opts.hot  ?? new THREE.Color('#fff4d8') },
+      mid:    { value: opts.mid  ?? new THREE.Color('#ffaa55') },
+      cool:   { value: opts.cool ?? new THREE.Color('#7ad7ff') }
     };
     const diskMat = new THREE.ShaderMaterial({
       transparent: true,
