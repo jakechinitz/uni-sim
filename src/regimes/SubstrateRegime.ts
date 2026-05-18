@@ -185,14 +185,20 @@ export class SubstrateRegime extends Regime {
   }
 
   update(ctx: RegimeContext, dt: number): void {
-    // dt is cosmic-sim seconds. The substrate runs ~10¹⁵× faster than cosmic
-    // time (paper: substrate-tick ≈ fs, cosmic-tick ≈ Gyr). Engine-time is
-    // therefore visDt × 10¹⁵, clamped at the lattice's CFL-stable max. This
-    // means substrate dynamics look alive at every cosmic speed and only
-    // genuinely slow at the femtosecond slow-mo presets.
-    const SUB_RATE = 1e15;
+    // dt is cosmic-sim seconds.
+    //
+    // ⚠ Lattice-pace gain (SUB_ENGINE_GAIN) is a UX tuning constant, not a
+    // paper-derived ratio. The manuscript (Chinitz 2026) defines τ₀ ≈ H₀⁻¹
+    // (transport relaxation time) and L_* ≈ 1.6×10⁻³⁵ m (substrate cell
+    // length), but does NOT elevate L_*/c to a fundamental substrate clock
+    // rate. If you constructed one naively, the ratio cosmic-time / cell-
+    // light-crossing-time would be ~10⁶⁰, which is unusable as a slider
+    // mapping. We instead pick this gain to land "lattice dynamics visibly
+    // alive" inside the slider's femtosecond/picosecond presets — purely a
+    // visualisation choice, free to adjust.
+    const SUB_ENGINE_GAIN = 1e15;
     const dtClamp = Math.min(0.05, Math.abs(dt)) * Math.sign(dt || 1);
-    const engineDt = Math.min(0.06, Math.abs(dt) * SUB_RATE) * Math.sign(dt || 1);
+    const engineDt = Math.min(0.06, Math.abs(dt) * SUB_ENGINE_GAIN) * Math.sign(dt || 1);
     this.time += Math.max(Math.abs(dtClamp), ctx.dtWall * 0.5);
 
     // Push current scene defect positions into the engine (so user drags are
