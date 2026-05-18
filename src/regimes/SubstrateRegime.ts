@@ -9,7 +9,7 @@ import { Defect } from '../core/Gravity';
 import { radialGlow } from '../render/Glow';
 import { TET_MICROSTATES, G_SHARE_EFF } from '../util/units';
 import { TelegrapherField } from '../render/Telegrapher';
-import { formatSI } from '../core/Closure';
+import { formatSI, cellScrambling } from '../core/Closure';
 import { SubstrateSim, SimDefect, SUB_Q_SAT } from '../core/SubstrateSim';
 
 const N_TET   = 220;        // tetrahedra to render
@@ -185,14 +185,27 @@ export class SubstrateRegime extends Regime {
   }
 
   update(ctx: RegimeContext, dt: number): void {
-    // dt is cosmic-sim seconds. The substrate runs ~10¹⁵× faster than cosmic
-    // time (paper: substrate-tick ≈ fs, cosmic-tick ≈ Gyr). Engine-time is
-    // therefore visDt × 10¹⁵, clamped at the lattice's CFL-stable max. This
-    // means substrate dynamics look alive at every cosmic speed and only
-    // genuinely slow at the femtosecond slow-mo presets.
-    const SUB_RATE = 1e15;
+    // dt is cosmic-sim seconds.
+    //
+    // LATTICE_PACE_SCALE is a viewer calibration, not a paper-derived ratio.
+    // Justification:
+    //   • Engine wave-speed in the lattice is 1 cell per CFL_DT = 0.4
+    //     lattice-seconds (PDE-internal); the 20-cell lattice front-crosses
+    //     in ~8 lattice-seconds.
+    //   • At cosmic speed s, engineDt per frame = min(MAX, s·dtWall·G).
+    //   • Pick G so the engine just slows below MAX at the "Quantum" preset
+    //     (s = 10⁻¹⁵): solving s·dtWall·G ≈ MAX gives G ≈ MAX/(10⁻¹⁵·dtWall)
+    //     ≈ 0.06/(10⁻¹⁵·0.016) ≈ 4×10¹⁵. We round to 10¹⁵ — at "Quantum" the
+    //     engine is just below saturation, so fronts visibly crawl over a
+    //     few wall-seconds. UX, not physics.
+    //
+    // The Vikram, Shou, Galitski (PRL 2026) lower bound t_scr ≳ βℏ/(2π)·ln(S)
+    // is a rigorous FLOOR on scrambling time at any temperature; it does
+    // not constrain this gain from above. We surface that bound on every
+    // BH hover (and in `Closure.scrambling()`) where it IS rigorous.
+    const LATTICE_PACE_SCALE = 1e15;
     const dtClamp = Math.min(0.05, Math.abs(dt)) * Math.sign(dt || 1);
-    const engineDt = Math.min(0.06, Math.abs(dt) * SUB_RATE) * Math.sign(dt || 1);
+    const engineDt = Math.min(0.06, Math.abs(dt) * LATTICE_PACE_SCALE) * Math.sign(dt || 1);
     this.time += Math.max(Math.abs(dtClamp), ctx.dtWall * 0.5);
 
     // Push current scene defect positions into the engine (so user drags are
@@ -380,20 +393,25 @@ export class SubstrateRegime extends Regime {
     const d   = this.defects[idx];
     const q   = this.qAt(d.pos[0], d.pos[1], d.pos[2]);
     const saturated = q < SUB_Q_SAT * 4;
+    // Vikram-bound cell scrambling floor at the Planck temperature (the only
+    // intrinsic substrate temperature scale; paper does not define one, so we
+    // expose this as a reference).
+    const T_PLANCK = 1.416784e32;
+    const cs = cellScrambling(T_PLANCK);
     const rows = [
       { k: 'q (capacity)', v: q.toFixed(3) + (saturated ? ' · saturated' : '') },
       { k: 'Ω_tet',        v: TET_MICROSTATES.toLocaleString() },
-      { k: '4 faces ×',    v: '7 states' },
-      { k: 'j₀',           v: '3/2 (fermionic)' },
+      { k: '4 faces ×',    v: '7 states · j₀=3/2' },
       { k: 'g_share,eff',  v: G_SHARE_EFF.toFixed(4) },
-      { k: 'L* (substrate)', v: formatSI(1.60771947e-35, 'm', 2) },
+      { k: 'L*',           v: formatSI(1.60771947e-35, 'm', 2) },
+      { k: 't_scr|cell @ T_P', v: formatSI(cs.t_scr, 's', 2) },
     ];
     return {
       title: saturated ? 'Defect · q→0 saturated (mini-BH)' : 'Defect · one-bit fermion anchor',
       rows,
       note: saturated
-        ? 'No remaining capacity. Same lapse rule N² = q as the galactic BH — two scales, one mechanism.'
-        : 'ΔS = ln 2 per defect (paper §13). Drag through another defect → q→0 → mini-BH forms.'
+        ? 'No remaining capacity. Same lapse rule N²=q as the galactic BH — two scales, one mechanism.'
+        : 'ΔS = ln 2 per defect (paper §13). Cell scrambling floor t_scr ≳ βℏ/(2π)·ln(Ω_tet) — Vikram, Shou, Galitski PRL 2026.'
     };
   }
 }

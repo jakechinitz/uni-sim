@@ -103,3 +103,31 @@ export function hawking(massKg: number) {
 
 // Solar-mass shorthand for sim-unit BHs.
 export function hawkingSolar(massMsun: number) { return hawking(massMsun * M_SUN); }
+
+// Vikram, Shou, Galitski (arXiv 2404.15403; Phys. Rev. Lett. 2026):
+// universal lower bound on Hamiltonian scrambling time at finite T,
+//   t_scr ≳ (β ℏ / 2π) · ln(S/k_B),    β = 1/(k_B T)
+// For Schwarzschild BHs this reproduces the Hayden–Preskill / Sekino–
+// Susskind fast-scrambling bound — originally motivated by black holes,
+// proven rigorous as a property of QM. Cleanly composes with the paper's
+// §20 thermodynamics (S_BH = A/4, T_H = ℏc³/8πGMk_B emerge from substrate
+// counting), giving an actual measurable scrambling timescale per BH.
+export function scrambling(massKg: number) {
+  const h = hawking(massKg);
+  const beta = 1 / (K_B * h.T_H);
+  const lnS  = Math.log(h.S_BH / K_B);
+  const t_scr = (beta * HBAR / (2 * Math.PI)) * lnS;
+  return { t_scr, beta, lnS, T_H: h.T_H, S_BH: h.S_BH };
+}
+
+// Vikram bound applied to a single substrate cell. The cell entropy is the
+// admissibility-closed sharing entropy g_share,eff = 7.42 (paper §6); the
+// cell temperature has no manuscript-defined value, so we expose it as a
+// parameter. Returns the floor time below which the cell cannot have fully
+// scrambled its 1,680 microstates.
+export function cellScrambling(T_cell_K: number) {
+  const lnS = Math.log(G_SHARE_EFF);     // ≈ 2.0; S/k_B = g_share,eff
+  const beta = 1 / (K_B * T_cell_K);
+  const t_scr = (beta * HBAR / (2 * Math.PI)) * lnS;
+  return { t_scr, beta, lnS };
+}
