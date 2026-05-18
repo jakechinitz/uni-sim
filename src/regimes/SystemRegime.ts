@@ -7,6 +7,7 @@ import { mulberry32 } from '../core/Rng';
 import { hashStr } from '../util/hash';
 import { radialGlow } from '../render/Glow';
 import { Body, accelOnRAR, stepLeapfrog } from '../core/Gravity';
+import { TelegrapherField } from '../render/Telegrapher';
 
 const N_PLANETS = 7;
 const G_SIM     = 4.0;
@@ -31,6 +32,8 @@ export class SystemRegime extends Regime {
   private fieldLines: THREE.LineSegments;
   private fieldOpacity = 0;
   private time = 0;
+  private wallTime = 0;
+  private telegrapher = new TelegrapherField(30, new THREE.Color(0xffd9a0));
 
   constructor(aspect: number, seed: number) {
     super(aspect);
@@ -154,12 +157,15 @@ export class SystemRegime extends Regime {
     });
     this.fieldLines = new THREE.LineSegments(g, m);
     this.scene.add(this.fieldLines);
+    this.scene.add(this.telegrapher.group);
   }
 
   update(ctx: RegimeContext, dt: number): void {
-    this.time += dt;
+    const visDt = Math.min(0.06, Math.abs(dt)) * Math.sign(dt || 1);
+    this.time += visDt;
+    this.wallTime += ctx.dtWall;
     const sub = 2;
-    const dtSim = Math.min(0.05, dt) / sub;
+    const dtSim = visDt / sub;
     const bodies: Body[] = [this.starBody, ...this.planets.map(p => p.body)];
     for (let s = 0; s < sub; s++) {
       stepLeapfrog(bodies, dtSim, (i, all) => accelOnRAR(i, all, G_SIM, A0_SIM));
@@ -169,9 +175,7 @@ export class SystemRegime extends Regime {
     this.starMesh.position.set(this.starBody.pos[0], this.starBody.pos[1], this.starBody.pos[2]);
     for (const pv of this.planets) {
       pv.mesh.position.set(pv.body.pos[0], pv.body.pos[1], pv.body.pos[2]);
-      if (pv.ring) pv.ring.rotation.z += dt * 0.1;
-      // Trail: shift left by one slot and append current position at the tail.
-      // Keeps the line contiguous in time order (oldest -> newest).
+      if (pv.ring) pv.ring.rotation.z += visDt * 0.1;
       const tp = pv.trailPositions;
       tp.copyWithin(0, 3, TRAIL * 3);
       tp[(TRAIL - 1) * 3 + 0] = pv.body.pos[0];
@@ -181,14 +185,16 @@ export class SystemRegime extends Regime {
       attr.needsUpdate = true;
     }
 
-    // Camera slow rotation
-    const r = 230, phi = this.time * 0.02;
+    // Camera pan on wall time so it stays alive at all speeds
+    const r = 230, phi = this.wallTime * 0.02;
     this.camera.position.set(Math.cos(phi) * r, 90, Math.sin(phi) * r);
     this.camera.lookAt(0, 0, 0);
 
-    this.fieldOpacity += ((ctx.entanglementOn ? 0.45 : 0) - this.fieldOpacity) * Math.min(1, dt * 4);
+    this.fieldOpacity += ((ctx.entanglementOn ? 0.45 : 0) - this.fieldOpacity) * Math.min(1, ctx.dtWall * 4);
     (this.fieldLines.material as THREE.LineBasicMaterial).opacity = this.fieldOpacity;
     this.fieldLines.visible = this.fieldOpacity > 0.01;
+
+    this.telegrapher.update(visDt);
   }
 
   bloomStrength(_ctx: RegimeContext): number {
@@ -211,6 +217,10 @@ export class SystemRegime extends Regime {
         onDragEnd: (v) => {
           pv.body.fixed = false;
           pv.body.vel[0] = v.x; pv.body.vel[1] = v.y; pv.body.vel[2] = v.z;
+          this.telegrapher.emit(
+            new THREE.Vector3(pv.body.pos[0], pv.body.pos[1], pv.body.pos[2]),
+            400, 0.7
+          );
         }
       };
     }
@@ -226,6 +236,10 @@ export class SystemRegime extends Regime {
         onDragEnd: (v) => {
           this.starBody.fixed = false;
           this.starBody.vel[0] = v.x; this.starBody.vel[1] = v.y; this.starBody.vel[2] = v.z;
+          this.telegrapher.emit(
+            new THREE.Vector3(this.starBody.pos[0], this.starBody.pos[1], this.starBody.pos[2]),
+            500, 1.0
+          );
         }
       };
     }

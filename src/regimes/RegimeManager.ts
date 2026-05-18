@@ -84,7 +84,8 @@ export class RegimeManager {
     // by a Composer.flash() in setZoom() and by per-regime visibility ramps.
     this.composer.setScene(this.current.scene, this.current.camera);
     this.composer.setBloom(this.current.bloomStrength({
-      seed: this.seed, time: 0, zoomIntra: 0, edePulse: 0, entanglementOn: false
+      seed: this.seed, time: 0, zoomIntra: 0, edePulse: 0,
+      entanglementOn: false, dtWall: 0, rate: 0
     }));
     this.composer.render(dt);
   }

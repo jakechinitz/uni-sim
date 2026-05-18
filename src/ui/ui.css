@@ -78,8 +78,25 @@ html, body {
 }
 #ui label.slider.short { flex: 0 0 180px; min-width: 160px; }
 #ui label.slider .lbl  { width: 38px; color: var(--dim); text-transform: uppercase; letter-spacing: 0.12em; font-size: 10px; }
-#ui label.slider .val  { width: 220px; color: rgba(255,255,255,0.85); white-space: nowrap; }
+#ui label.slider .val  { min-width: 110px; color: rgba(255,255,255,0.85); white-space: nowrap; text-align: right; }
 #ui label.slider.short .val { width: 60px; text-align: right; }
+
+.chips {
+  display: flex; gap: 4px; flex-wrap: wrap;
+  margin-left: 6px;
+}
+.chip {
+  height: 22px !important;
+  min-width: 0 !important;
+  padding: 0 8px !important;
+  font-size: 10.5px !important;
+  border-radius: 999px !important;
+  background: rgba(255,255,255,0.02) !important;
+  color: var(--dim) !important;
+  letter-spacing: 0.04em;
+}
+.chip:hover  { color: var(--accent) !important; border-color: rgba(122,215,255,0.35) !important; }
+.chip.on     { color: var(--accent) !important; border-color: rgba(122,215,255,0.7) !important; background: rgba(122,215,255,0.10) !important; }
 
 #ui input[type="range"] {
   flex: 1; min-width: 80px;

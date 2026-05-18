@@ -196,7 +196,8 @@ export class CosmicRegime extends Regime {
                           Math.max(0, 0.1 - 0.1 * smoothstep(recomb, 0.01, t));
     const radMat = this.radNoiseMesh.material as THREE.ShaderMaterial;
     radMat.uniforms.intensity.value = radIntensity * (1 + 0.6 * ctx.edePulse);
-    radMat.uniforms.time.value += dt;
+    // Radiation noise is pure visual ambiance — wall time, never freezes
+    radMat.uniforms.time.value += ctx.dtWall;
     radMat.uniforms.tint.value.setRGB(
       1.0, 0.55 + 0.15 * ctx.edePulse, 0.30 + 0.20 * ctx.edePulse
     );
@@ -216,10 +217,12 @@ export class CosmicRegime extends Regime {
       haloMat.opacity = ctx.entanglementOn ? 0.22 * g.fadeIn : 0;
     }
 
-    // N-body step with RAR — softened, bounded
+    // N-body step with RAR — softened, bounded. Cap visual sim-time per frame
+    // so fast-forward doesn't blow up the leapfrog.
     const bodies = this.galaxies.map(g => g.body);
     const substeps = 2;
-    const dtSim = Math.min(0.03, dt) / substeps;
+    const visDt = Math.min(0.04, Math.abs(dt)) * Math.sign(dt || 1);
+    const dtSim = visDt / substeps;
     for (let s = 0; s < substeps; s++) {
       stepLeapfrog(bodies, dtSim, (i, all) => accelOnRAR(i, all, G_SIM, A0_SIM));
     }

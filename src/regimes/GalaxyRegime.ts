@@ -8,6 +8,7 @@ import { hashStr } from '../util/hash';
 import { radialGlow } from '../render/Glow';
 import { BlackHole } from '../render/BlackHole';
 import { Body } from '../core/Gravity';
+import { TelegrapherField } from '../render/Telegrapher';
 
 const N_STARS = 6000;
 const R_GAL   = 18;
@@ -36,6 +37,8 @@ export class GalaxyRegime extends Regime {
   private flMaterial: THREE.LineBasicMaterial;
   private picked: THREE.Sprite;
   private time = 0;
+  private wallTime = 0;
+  private telegrapher = new TelegrapherField(2.0, new THREE.Color(0x9ee0ff));
 
   constructor(aspect: number, seed: number) {
     super(aspect);
@@ -214,6 +217,9 @@ export class GalaxyRegime extends Regime {
     });
     this.fieldLines = new THREE.LineSegments(lineGeom, this.flMaterial);
     this.scene.add(this.fieldLines);
+
+    // Telegrapher wave group — emits when objects are flicked
+    this.scene.add(this.telegrapher.group);
   }
 
   private circularSpeed(r: number): number {
@@ -226,13 +232,18 @@ export class GalaxyRegime extends Regime {
   }
 
   update(ctx: RegimeContext, dt: number): void {
-    this.time += dt;
+    // dt is sim seconds. Clamp the per-frame step so fast-forward doesn't
+    // shatter orbits; wall-time accumulator drives pure-UI animations (halo
+    // fade, camera pan) so they stay alive at extreme speeds.
+    const visDt = Math.min(0.06, Math.abs(dt)) * Math.sign(dt || 1);
+    this.time += visDt;
+    this.wallTime += ctx.dtWall;
     this.spiralMat.uniforms.time.value = this.time;
     this.bh.tick(this.time);
 
     // Integrate stars under BH gravity using RAR
     const sub = 2;
-    const dtSim = Math.min(0.05, dt) / sub;
+    const dtSim = visDt / sub;
     for (let s = 0; s < sub; s++) {
       // Test-particle approximation: each star only feels the BH
       for (const star of this.stars) {
@@ -272,8 +283,11 @@ export class GalaxyRegime extends Regime {
     this.fieldLines.visible = ctx.entanglementOn;
     this.flMaterial.opacity = ctx.entanglementOn ? 0.4 : 0;
 
-    // Subtle camera pan
-    const phi = this.time * 0.05;
+    // Telegrapher waves advance with sim-time (paper §17: D/τ₀ = c²)
+    this.telegrapher.update(visDt);
+
+    // Subtle camera pan driven by wall time so it never freezes
+    const phi = this.wallTime * 0.05;
     this.camera.position.x = Math.sin(phi) * R_GAL * 0.1;
     this.camera.lookAt(0, 0, 0);
   }
@@ -294,7 +308,11 @@ export class GalaxyRegime extends Regime {
         onDragMove: (p) => {
           body.pos[0] = p.x; body.pos[1] = p.y; body.pos[2] = p.z;
         },
-        onDragEnd: (_v) => { body.vel[0] = body.vel[1] = body.vel[2] = 0; }
+        onDragEnd: (_v) => {
+          body.vel[0] = body.vel[1] = body.vel[2] = 0;
+          // Disturbing a defect launches a telegrapher front through the substrate
+          this.telegrapher.emit(this.bh.position.clone(), R_GAL * 2.2, 1.0);
+        }
       };
     }
     return null;

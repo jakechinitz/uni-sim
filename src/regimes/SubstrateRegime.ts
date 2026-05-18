@@ -8,6 +8,7 @@ import { hashStr } from '../util/hash';
 import { qField, gradAccelQ, Defect } from '../core/Gravity';
 import { radialGlow } from '../render/Glow';
 import { TET_MICROSTATES, G_SHARE_EFF } from '../util/units';
+import { TelegrapherField } from '../render/Telegrapher';
 
 const N_TET   = 220;        // tetrahedra to render
 const LATTICE_R = 14;
@@ -31,6 +32,10 @@ export class SubstrateRegime extends Regime {
   private vertOffsets: Float32Array;  // per-tet vertex offsets from center (12 verts × 3 floats)
   private edgePairs: [number, number][];  // edges of a tetrahedron in vertex-index pairs
   private defectVels: [number, number, number][] = [];
+  // propSpeed 0.5 scene-units/sim-sec means at "Quantum" preset (fs/s slow-mo)
+  // the ripple takes ~30 wall-sec to cross the lattice — exactly the regime
+  // where finite-c substrate transport is meant to be visible.
+  private telegrapher = new TelegrapherField(0.5, new THREE.Color(0xa0e0ff));
 
   constructor(aspect: number, seed: number) {
     super(aspect);
@@ -91,6 +96,7 @@ export class SubstrateRegime extends Regime {
     });
     this.edgeLines = new THREE.LineSegments(this.edgeGeom, edgeMat);
     this.scene.add(this.edgeLines);
+    this.scene.add(this.telegrapher.group);
 
     // Defects
     const defectTex = radialGlow(256, '#ffffff', '#ffb070', 'rgba(255,80,40,0)');
@@ -120,10 +126,11 @@ export class SubstrateRegime extends Regime {
   }
 
   update(ctx: RegimeContext, dt: number): void {
-    this.time += dt;
-
-    // Integrate defect motion under their mutual q-field
-    const dtClamp = Math.min(dt, 1 / 30);
+    // dt is sim seconds. At default fast-forward this is huge; clamp so the
+    // defect integration stays stable. Slower speeds → smaller dt → genuine
+    // slow-mo of substrate dynamics.
+    const dtClamp = Math.min(0.05, Math.abs(dt)) * Math.sign(dt || 1);
+    this.time += dtClamp;
     for (let i = 0; i < this.defects.length; i++) {
       const d = this.defects[i];
       if ((d as any).fixed) continue;
@@ -191,6 +198,8 @@ export class SubstrateRegime extends Regime {
     const phi = this.time * 0.04;
     this.camera.position.set(Math.sin(phi) * LATTICE_R * 1.4, 4, Math.cos(phi) * LATTICE_R * 1.4);
     this.camera.lookAt(0, 0, 0);
+
+    this.telegrapher.update(dtClamp);
   }
 
   bloomStrength(_ctx: RegimeContext): number { return 0.7; }
@@ -217,6 +226,12 @@ export class SubstrateRegime extends Regime {
         this.defectVels[idx][0] = v.x;
         this.defectVels[idx][1] = v.y;
         this.defectVels[idx][2] = v.z;
+        // Moving a defect launches a substrate ripple. Per §17 of the paper
+        // this propagates at c. Visible at "Quantum"-preset slow-mo.
+        this.telegrapher.emit(
+          new THREE.Vector3(d.pos[0], d.pos[1], d.pos[2]),
+          LATTICE_R * 1.4, 1.0
+        );
       }
     };
   }

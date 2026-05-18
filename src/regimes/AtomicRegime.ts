@@ -95,8 +95,8 @@ export class AtomicRegime extends Regime {
   }
 
   update(_ctx: RegimeContext, dt: number): void {
-    this.time += dt;
-    const dtClamp = Math.min(dt, 1 / 30);
+    const dtClamp = Math.min(0.05, Math.abs(dt)) * Math.sign(dt || 1);
+    this.time += dtClamp;
     // Spring restoration to rest position
     for (const a of this.atoms) {
       if (a.body.fixed) continue;

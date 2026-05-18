@@ -9,6 +9,7 @@ import { decodeZoom } from './core/Camera';
 import { bindUI, setHud, syncControls } from './ui/ui';
 import { SaveData, autosave, emptySave, loadLocal } from './core/Store';
 import { DragController } from './core/Drag';
+import { formatRate } from './util/units';
 
 export class App {
   private renderer: THREE.WebGLRenderer;
@@ -103,7 +104,7 @@ export class App {
 
   private loop = () => {
     requestAnimationFrame(this.loop);
-    const dt = this.clock.tick();
+    const { dtWall, dtSim } = this.clock.tick();
 
     // sync state from clock
     this.state.scrub = this.clock.scrub;
@@ -124,10 +125,12 @@ export class App {
       time: tGyr,
       zoomIntra: slice.intra,
       edePulse: ede,
-      entanglementOn: this.state.toggles.entangle
-    }, dt);
+      entanglementOn: this.state.toggles.entangle,
+      dtWall,
+      rate: this.clock.speed
+    }, dtSim);
 
-    this.regimes.render(dt);
+    this.regimes.render(dtWall);
 
     // HUD
     const zR = cosmoZ(tGyr);
@@ -139,7 +142,7 @@ export class App {
     setHud({
       time:  `${tLabel} · ${zLabel} · ${ep.label}`,
       zoom:  `${slice.regime} ▸ ${slice.intra.toFixed(2)}`,
-      speed: this.clock.speedExp === 0 ? 'pause' : `×${(this.clock.speed).toFixed(2)}`,
+      speed: formatRate(this.clock.speed),
       epoch: ep.label
     });
 
