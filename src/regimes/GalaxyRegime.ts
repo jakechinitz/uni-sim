@@ -2,13 +2,14 @@
 // has flat rotation curve (paper §14 — no dark matter needed).
 
 import * as THREE from 'three';
-import { Regime, RegimeContext, DragTarget } from './Regime';
+import { Regime, RegimeContext, DragTarget, HoverInfo } from './Regime';
 import { mulberry32 } from '../core/Rng';
 import { hashStr } from '../util/hash';
 import { radialGlow } from '../render/Glow';
 import { BlackHole } from '../render/BlackHole';
 import { Body } from '../core/Gravity';
 import { TelegrapherField } from '../render/Telegrapher';
+import { hawkingSolar, formatSI } from '../core/Closure';
 
 const N_STARS = 6000;
 const R_GAL   = 18;
@@ -316,5 +317,26 @@ export class GalaxyRegime extends Regime {
       };
     }
     return null;
+  }
+
+  hoverInfo(intersection: THREE.Intersection): HoverInfo | null {
+    const ud = intersection.object.userData;
+    if (ud?.type !== 'bh') return null;
+    // Map sim BH_MASS to a physical galactic SMBH (~4e6 M_sun like Sgr A*).
+    // The sim BH mass is dimensionless; map it to a fiducial Sgr A*-class value.
+    const m_solar = 4.15e6;
+    const h = hawkingSolar(m_solar);
+    return {
+      title: 'Supermassive black hole · paper §20',
+      rows: [
+        { k: 'M',     v: `${m_solar.toExponential(2)} M☉` },
+        { k: 'r_s',   v: formatSI(h.rs, 'm', 2) },
+        { k: 'A',     v: formatSI(h.area, 'm²', 2) },
+        { k: 'T_H',   v: formatSI(h.T_H, 'K', 2) },
+        { k: 'S_BH',  v: formatSI(h.S_BH, 'J/K', 2) },
+        { k: 't_evap', v: `~${(h.t_evap / 3.156e16 / 1e9).toExponential(1)} Gyr` },
+      ],
+      note: 'q(r) = 1 − 2GM/c²r → q = 0 at horizon. S_BH = A/4 emerges from ln 2 per face.'
+    };
   }
 }

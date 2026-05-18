@@ -4,7 +4,7 @@
 // pointerup → releases with windowed velocity.
 
 import * as THREE from 'three';
-import type { DragTarget } from '../regimes/Regime';
+import type { DragTarget, HoverInfo } from '../regimes/Regime';
 
 export class DragController {
   private raycaster = new THREE.Raycaster();
@@ -16,13 +16,15 @@ export class DragController {
   private lastWorld = new THREE.Vector3();
   private velocity = new THREE.Vector3();
   private velSamples: { p: THREE.Vector3; t: number }[] = [];
+  onHover: (info: HoverInfo | null, clientX: number, clientY: number) => void = () => {};
 
   constructor(
     canvas: HTMLCanvasElement,
     _getCurrentScene: () => THREE.Scene,
     private getCurrentCamera: () => THREE.Camera,
     private getDraggables: () => THREE.Group,
-    private regimePick: (i: THREE.Intersection) => DragTarget | null
+    private regimePick: (i: THREE.Intersection) => DragTarget | null,
+    private regimeHover: (i: THREE.Intersection) => HoverInfo | null = () => null
   ) {
     this.canvas = canvas;
     canvas.addEventListener('pointerdown', this.onDown, { passive: false });
@@ -83,13 +85,18 @@ export class DragController {
       const cutoff = performance.now() / 1000 - 0.08;
       while (this.velSamples.length > 2 && this.velSamples[0].t < cutoff) this.velSamples.shift();
     } else {
-      // hover detection — show cursor ring if over a draggable
+      // hover detection — show cursor ring + hover card if over a draggable
       const cam = this.getCurrentCamera();
       this.raycaster.setFromCamera(this.pointerNdc, cam);
       const hits = this.raycaster.intersectObjects(this.getDraggables().children, true);
-      const overDraggable = hits.length > 0 && !!this.regimePick(hits[0]);
+      const hit = hits[0];
+      const overDraggable = !!hit && !!this.regimePick(hit);
       this.cursor.classList.toggle('active', overDraggable);
       this.canvas.classList.toggle('grab', overDraggable);
+      this.onHover(
+        overDraggable ? this.regimeHover(hit) : null,
+        ev.clientX, ev.clientY
+      );
     }
   };
 

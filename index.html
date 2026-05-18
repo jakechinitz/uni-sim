@@ -50,6 +50,7 @@
       <div class="cluster">
         <label class="pill"><input id="toggle-entangle" type="checkbox" /><span>entanglement</span></label>
         <label class="pill"><input id="toggle-bloom" type="checkbox" checked /><span>bloom</span></label>
+        <button id="btn-closure" class="pill-btn" title="show derivation of G from 1,680 microstates">closure</button>
       </div>
 
       <div class="cluster">
@@ -62,6 +63,16 @@
   </div>
 
   <div id="cursor"></div>
+
+  <div id="closure-panel" class="hidden">
+    <div class="panel-head">
+      <div class="panel-title">Closure chain · 1,680 microstates → Newton's <i>G</i></div>
+      <button id="btn-closure-close" class="x" title="close">×</button>
+    </div>
+    <div class="panel-body" id="closure-body"></div>
+  </div>
+
+  <div id="hover-card" class="hidden"></div>
 
   <script type="module" src="/src/main.ts"></script>
 </body>

@@ -21,6 +21,12 @@ export interface DragTarget {
   onDragEnd: (v: THREE.Vector3) => void;
 }
 
+export interface HoverInfo {
+  title: string;
+  rows: { k: string; v: string }[];
+  note?: string;
+}
+
 export abstract class Regime {
   scene = new THREE.Scene();
   camera: THREE.PerspectiveCamera;
@@ -35,6 +41,8 @@ export abstract class Regime {
   abstract update(ctx: RegimeContext, dt: number): void;
   abstract pick(intersection: THREE.Intersection): DragTarget | null;
   abstract bloomStrength(ctx: RegimeContext): number;
+  // Optional: paper-physics hover panel for the intersected object.
+  hoverInfo(_intersection: THREE.Intersection): HoverInfo | null { return null; }
 
   resize(w: number, h: number) {
     this.camera.aspect = w / h;

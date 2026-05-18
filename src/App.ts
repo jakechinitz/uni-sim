@@ -7,6 +7,8 @@ import { Clock } from './core/Clock';
 import { z as cosmoZ, epoch as cosmoEpoch, edePulse } from './core/Cosmology';
 import { decodeZoom } from './core/Camera';
 import { bindUI, setHud, syncControls } from './ui/ui';
+import { bindClosurePanel } from './ui/Closure';
+import { updateHoverCard } from './ui/HoverCard';
 import { SaveData, autosave, emptySave, loadLocal } from './core/Store';
 import { DragController } from './core/Drag';
 import { formatRate } from './util/units';
@@ -47,13 +49,17 @@ export class App {
     this.regimes = new RegimeManager(this.renderer, this.composer, this.state.seed);
     this.regimes.setZoom(this.state.zoom);
 
-    new DragController(
+    const drag = new DragController(
       canvas,
       () => this.regimes.current.scene,
       () => this.regimes.current.camera,
       () => this.regimes.current.draggable,
-      (i) => this.regimes.pick(i)
+      (i) => this.regimes.pick(i),
+      (i) => this.regimes.hoverInfo(i)
     );
+    drag.onHover = (info, x, y) => updateHoverCard(info, x, y);
+
+    bindClosurePanel();
 
     bindUI({
       state: this.state,

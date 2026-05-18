@@ -2,13 +2,14 @@
 // q-field recomputed live → wireframe edges recolor → pile defects → q→0 → mini black hole.
 
 import * as THREE from 'three';
-import { Regime, RegimeContext, DragTarget } from './Regime';
+import { Regime, RegimeContext, DragTarget, HoverInfo } from './Regime';
 import { mulberry32 } from '../core/Rng';
 import { hashStr } from '../util/hash';
 import { qField, gradAccelQ, Defect } from '../core/Gravity';
 import { radialGlow } from '../render/Glow';
 import { TET_MICROSTATES, G_SHARE_EFF } from '../util/units';
 import { TelegrapherField } from '../render/Telegrapher';
+import { formatSI } from '../core/Closure';
 
 const N_TET   = 220;        // tetrahedra to render
 const LATTICE_R = 14;
@@ -146,16 +147,23 @@ export class SubstrateRegime extends Regime {
       this.defectMeshes[i].position.set(d.pos[0], d.pos[1], d.pos[2]);
     }
 
-    // Defect glow: if q at defect center ~ 0, render hot red (saturated = mini BH)
+    // Defect glow: saturation q→0 = mini-BH. Smaller q → hotter Hawking glow
+    // (T_H ∝ 1/M; here we map "1/q-deficit" as a stand-in for inverse horizon mass).
+    // Pulse amplitude breathes on wall-time so it never freezes.
+    const pulse = 0.85 + 0.15 * Math.sin(this.time * 3.0);
     for (let i = 0; i < this.defects.length; i++) {
       const d = this.defects[i];
       const others = this.defects.filter((_, j) => j !== i);
       const localQ = qField(d.pos[0], d.pos[1], d.pos[2], others);
       const mat = this.defectMeshes[i].material as THREE.SpriteMaterial;
       if (localQ < 0.05) {
-        mat.color.setRGB(1.0, 0.25, 0.20);
+        // Hawking-hot: hotter (whiter) as q → 0
+        const hot = 1 - localQ * 20;  // 0..1
+        mat.color.setRGB(1.0, 0.30 + 0.55 * hot, 0.18 + 0.55 * hot);
+        this.defectMeshes[i].scale.setScalar(0.9 + 0.6 * hot * pulse);
       } else {
         mat.color.setRGB(1.0, 0.82, 0.62);
+        this.defectMeshes[i].scale.setScalar(1.0);
       }
     }
 
@@ -238,5 +246,31 @@ export class SubstrateRegime extends Regime {
 
   hudExtras(): string {
     return `tetra · 4 faces × 7 states · Ω=${TET_MICROSTATES} · g_share≈${G_SHARE_EFF}`;
+  }
+
+  hoverInfo(intersection: THREE.Intersection): HoverInfo | null {
+    const ud = intersection.object.userData;
+    if (ud?.type !== 'defect') return null;
+    const idx = ud.index as number;
+    const d   = this.defects[idx];
+    // q sampled at this defect's center, excluding self
+    const others = this.defects.filter((_, j) => j !== idx);
+    const q     = qField(d.pos[0], d.pos[1], d.pos[2], others);
+    const saturated = q < 0.05;
+    const rows = [
+      { k: 'q (capacity)', v: q.toFixed(3) + (saturated ? ' · saturated' : '') },
+      { k: 'Ω_tet',        v: TET_MICROSTATES.toLocaleString() },
+      { k: '4 faces ×',    v: '7 states' },
+      { k: 'j₀',           v: '3/2 (fermionic)' },
+      { k: 'g_share,eff',  v: G_SHARE_EFF.toFixed(4) },
+      { k: 'L* (substrate)', v: formatSI(1.60771947e-35, 'm', 2) },
+    ];
+    return {
+      title: saturated ? 'Defect · q→0 saturated (mini-BH)' : 'Defect · one-bit fermion anchor',
+      rows,
+      note: saturated
+        ? 'No remaining capacity. Same lapse rule N² = q as the galactic BH — two scales, one mechanism.'
+        : 'ΔS = ln 2 per defect (paper §13). Drag through another defect → q→0 → mini-BH forms.'
+    };
   }
 }

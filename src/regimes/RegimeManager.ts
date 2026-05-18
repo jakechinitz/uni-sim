@@ -94,6 +94,10 @@ export class RegimeManager {
     return this.current.pick(intersect);
   }
 
+  hoverInfo(intersect: THREE.Intersection) {
+    return this.current.hoverInfo(intersect);
+  }
+
   private get(key: RegimeKey): Regime {
     let r = this.cache.get(key);
     if (!r) {
