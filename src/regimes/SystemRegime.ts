@@ -8,6 +8,7 @@ import { hashStr } from '../util/hash';
 import { radialGlow } from '../render/Glow';
 import { Body, accelOnRAR, stepLeapfrog } from '../core/Gravity';
 import { TelegrapherField } from '../render/Telegrapher';
+import { PhotonField } from '../render/Photons';
 
 const N_PLANETS = 7;
 const G_SIM     = 4.0;
@@ -34,6 +35,9 @@ export class SystemRegime extends Regime {
   private time = 0;
   private wallTime = 0;
   private telegrapher = new TelegrapherField(30, new THREE.Color(0xffd9a0));
+  // Photon field — propSpeed 1000 scene-units/sim-sec → visible at "Light"
+  // preset (~5 wall-sec to traverse the system), blurs at faster speeds.
+  private photons = new PhotonField(800, 1000, 320, new THREE.Color(0xffeac0), 0.7);
 
   constructor(aspect: number, seed: number) {
     super(aspect);
@@ -158,6 +162,7 @@ export class SystemRegime extends Regime {
     this.fieldLines = new THREE.LineSegments(g, m);
     this.scene.add(this.fieldLines);
     this.scene.add(this.telegrapher.group);
+    this.scene.add(this.photons.group);
   }
 
   update(ctx: RegimeContext, dt: number): void {
@@ -195,6 +200,20 @@ export class SystemRegime extends Regime {
     this.fieldLines.visible = this.fieldOpacity > 0.01;
 
     this.telegrapher.update(visDt);
+
+    // Photons — real particles emitted by the star and propagating at sim-c.
+    // Emit at a wall-time pace (visible at any speed); advance with visDt so
+    // slow-mo makes them crawl. At fast-forward they blast across instantly.
+    const starPos = new THREE.Vector3(this.starBody.pos[0], this.starBody.pos[1], this.starBody.pos[2]);
+    // Trickle photons in: a steady ~50 per wall-second baseline, plus burst
+    // proportional to sim-time advance so emission scales with speed
+    this.photons.emit(starPos, 50, ctx.dtWall);
+    this.photons.emit(starPos, 0.4, visDt);
+    const absorbers = this.planets.map(pv => ({
+      pos: new THREE.Vector3(pv.body.pos[0], pv.body.pos[1], pv.body.pos[2]),
+      radius: 14
+    }));
+    this.photons.update(visDt, starPos, absorbers);
   }
 
   bloomStrength(_ctx: RegimeContext): number {

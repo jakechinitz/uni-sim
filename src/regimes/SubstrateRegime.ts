@@ -5,11 +5,12 @@ import * as THREE from 'three';
 import { Regime, RegimeContext, DragTarget, HoverInfo } from './Regime';
 import { mulberry32 } from '../core/Rng';
 import { hashStr } from '../util/hash';
-import { qField, gradAccelQ, Defect } from '../core/Gravity';
+import { Defect } from '../core/Gravity';
 import { radialGlow } from '../render/Glow';
 import { TET_MICROSTATES, G_SHARE_EFF } from '../util/units';
 import { TelegrapherField } from '../render/Telegrapher';
 import { formatSI } from '../core/Closure';
+import { SubstrateSim, SimDefect, SUB_Q_SAT } from '../core/SubstrateSim';
 
 const N_TET   = 220;        // tetrahedra to render
 const LATTICE_R = 14;
@@ -37,6 +38,17 @@ export class SubstrateRegime extends Regime {
   // the ripple takes ~30 wall-sec to cross the lattice — exactly the regime
   // where finite-c substrate transport is meant to be visible.
   private telegrapher = new TelegrapherField(0.5, new THREE.Color(0xa0e0ff));
+
+  // Real substrate engine — telegrapher PDE + discrete defects on a 20³ grid.
+  // The lattice IS the substrate; tetrahedra are visual scaffolding.
+  private sim = new SubstrateSim(20);
+  private simDefects: SimDefect[] = [];
+  // engine-cell → scene coords. Engine origin is at (N/2, N/2, N/2).
+  private cellSize = 0;            // set after sim construction
+  // q-cloud: instanced point sprites at every cell, opacity = (1-q)
+  private cloudMesh!: THREE.InstancedMesh;
+  private cloudDummy = new THREE.Object3D();
+  private cloudColor = new THREE.Color();
 
   constructor(aspect: number, seed: number) {
     super(aspect);
@@ -99,6 +111,27 @@ export class SubstrateRegime extends Regime {
     this.scene.add(this.edgeLines);
     this.scene.add(this.telegrapher.group);
 
+    // Sim-to-scene mapping. The lattice spans 2·LATTICE_R = 28 scene units.
+    this.cellSize = (2 * LATTICE_R) / this.sim.N;
+
+    // q-cloud — additive sprite per lattice cell, alpha = depletion (1-q).
+    // Cells at q ≈ 1 are invisible vacuum; depleted regions glow.
+    const cloudTex = radialGlow(64, 'rgba(255,255,255,1)', 'rgba(200,150,255,0.6)', 'rgba(120,0,200,0)');
+    const cloudGeom = new THREE.PlaneGeometry(1, 1);
+    const cloudMat  = new THREE.MeshBasicMaterial({
+      map: cloudTex,
+      transparent: true,
+      depthWrite: false,
+      blending: THREE.AdditiveBlending,
+      vertexColors: true
+    });
+    const V = this.sim.N * this.sim.N * this.sim.N;
+    this.cloudMesh = new THREE.InstancedMesh(cloudGeom, cloudMat, V);
+    this.cloudMesh.frustumCulled = false;
+    this.cloudMesh.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(V * 3), 3);
+    this.cloudMesh.count = 0;
+    this.scene.add(this.cloudMesh);
+
     // Defects
     const defectTex = radialGlow(256, '#ffffff', '#ffb070', 'rgba(255,80,40,0)');
     for (let i = 0; i < N_DEFECTS; i++) {
@@ -110,6 +143,9 @@ export class SubstrateRegime extends Regime {
       const defect: Defect = { id: `defect-${i}`, pos: [x, y, z], rS: 1.4 + rng() * 0.4 };
       this.defects.push(defect);
       this.defectVels.push([0, 0, 0]);
+      // Mirror into the engine
+      const enginePos = this.sceneToEngine(x, y, z);
+      this.simDefects.push(this.sim.addDefect(enginePos.ex, enginePos.ey, enginePos.ez, 0.5, defect.id));
 
       const s = new THREE.Sprite(new THREE.SpriteMaterial({
         map: defectTex,
@@ -126,61 +162,138 @@ export class SubstrateRegime extends Regime {
     }
   }
 
+  private sceneToEngine(x: number, y: number, z: number) {
+    const N = this.sim.N;
+    return {
+      ex: x / this.cellSize + N / 2,
+      ey: y / this.cellSize + N / 2,
+      ez: z / this.cellSize + N / 2
+    };
+  }
+  private engineToScene(ex: number, ey: number, ez: number) {
+    const N = this.sim.N;
+    return {
+      x: (ex - N / 2) * this.cellSize,
+      y: (ey - N / 2) * this.cellSize,
+      z: (ez - N / 2) * this.cellSize
+    };
+  }
+  // Sample q at a scene-space point using the engine's trilinear sampler.
+  private qAt(x: number, y: number, z: number): number {
+    const p = this.sceneToEngine(x, y, z);
+    return this.sim.qAt(p.ex, p.ey, p.ez);
+  }
+
   update(ctx: RegimeContext, dt: number): void {
-    // dt is sim seconds. At default fast-forward this is huge; clamp so the
-    // defect integration stays stable. Slower speeds → smaller dt → genuine
-    // slow-mo of substrate dynamics.
+    // dt is cosmic-sim seconds. The substrate runs ~10¹⁵× faster than cosmic
+    // time (paper: substrate-tick ≈ fs, cosmic-tick ≈ Gyr). Engine-time is
+    // therefore visDt × 10¹⁵, clamped at the lattice's CFL-stable max. This
+    // means substrate dynamics look alive at every cosmic speed and only
+    // genuinely slow at the femtosecond slow-mo presets.
+    const SUB_RATE = 1e15;
     const dtClamp = Math.min(0.05, Math.abs(dt)) * Math.sign(dt || 1);
-    this.time += dtClamp;
+    const engineDt = Math.min(0.06, Math.abs(dt) * SUB_RATE) * Math.sign(dt || 1);
+    this.time += Math.max(Math.abs(dtClamp), ctx.dtWall * 0.5);
+
+    // Push current scene defect positions into the engine (so user drags are
+    // felt by the lattice). Defects not being dragged read their position
+    // back from the engine after step().
     for (let i = 0; i < this.defects.length; i++) {
-      const d = this.defects[i];
-      if ((d as any).fixed) continue;
-      // skip self in field
-      const others = this.defects.filter((_, j) => j !== i);
-      const a = gradAccelQ(d.pos[0], d.pos[1], d.pos[2], others, 1.5);
-      this.defectVels[i][0] += dtClamp * a[0] - 0.4 * dtClamp * this.defectVels[i][0];
-      this.defectVels[i][1] += dtClamp * a[1] - 0.4 * dtClamp * this.defectVels[i][1];
-      this.defectVels[i][2] += dtClamp * a[2] - 0.4 * dtClamp * this.defectVels[i][2];
-      d.pos[0] += dtClamp * this.defectVels[i][0];
-      d.pos[1] += dtClamp * this.defectVels[i][1];
-      d.pos[2] += dtClamp * this.defectVels[i][2];
-      this.defectMeshes[i].position.set(d.pos[0], d.pos[1], d.pos[2]);
+      const d  = this.defects[i];
+      const sd = this.simDefects[i];
+      if ((d as any).fixed) {
+        const p = this.sceneToEngine(d.pos[0], d.pos[1], d.pos[2]);
+        sd.x = p.ex; sd.y = p.ey; sd.z = p.ez;
+        sd.vx = sd.vy = sd.vz = 0;
+        sd.fixed = true;
+      } else {
+        sd.fixed = false;
+      }
     }
 
-    // Defect glow: saturation q→0 = mini-BH. Smaller q → hotter Hawking glow
-    // (T_H ∝ 1/M; here we map "1/q-deficit" as a stand-in for inverse horizon mass).
-    // Pulse amplitude breathes on wall-time so it never freezes.
+    // Real PDE step + slow vacuum recovery (engineDt is decoupled from cosmic
+    // dt so the substrate stays animated except at extreme slow-mo)
+    this.sim.step(engineDt);
+    this.sim.relax(0.012, engineDt);
+
+    // Sync defects back from the engine to the scene
+    for (let i = 0; i < this.defects.length; i++) {
+      const d  = this.defects[i];
+      const sd = this.simDefects[i];
+      if (!(d as any).fixed) {
+        const s = this.engineToScene(sd.x, sd.y, sd.z);
+        d.pos[0] = s.x; d.pos[1] = s.y; d.pos[2] = s.z;
+        this.defectMeshes[i].position.set(s.x, s.y, s.z);
+        this.defectVels[i][0] = sd.vx;
+        this.defectVels[i][1] = sd.vy;
+        this.defectVels[i][2] = sd.vz;
+      }
+    }
+
+    // Defect glow: Hawking-style heat as local q approaches 0
     const pulse = 0.85 + 0.15 * Math.sin(this.time * 3.0);
     for (let i = 0; i < this.defects.length; i++) {
       const d = this.defects[i];
-      const others = this.defects.filter((_, j) => j !== i);
-      const localQ = qField(d.pos[0], d.pos[1], d.pos[2], others);
+      const localQ = this.qAt(d.pos[0], d.pos[1], d.pos[2]);
       const mat = this.defectMeshes[i].material as THREE.SpriteMaterial;
-      if (localQ < 0.05) {
-        // Hawking-hot: hotter (whiter) as q → 0
-        const hot = 1 - localQ * 20;  // 0..1
+      if (localQ < SUB_Q_SAT * 4) {
+        const hot = Math.min(1, 1 - localQ / (SUB_Q_SAT * 4));
         mat.color.setRGB(1.0, 0.30 + 0.55 * hot, 0.18 + 0.55 * hot);
-        this.defectMeshes[i].scale.setScalar(0.9 + 0.6 * hot * pulse);
+        this.defectMeshes[i].scale.setScalar(0.9 + 0.7 * hot * pulse);
       } else {
         mat.color.setRGB(1.0, 0.82, 0.62);
         this.defectMeshes[i].scale.setScalar(1.0);
       }
     }
 
-    // Recompute edge positions + colors using current q field
-    const cool = new THREE.Color(0x6090c0); // q=1 (vacuum)
-    const warm = new THREE.Color(0xff9050); // mid depletion
-    const hot  = new THREE.Color(0xff3030); // q→0 (saturated)
+    // Render the live q-field as an additive cloud. Only depleted cells
+    // (q < 0.92) are written so vacuum stays invisible.
+    const N = this.sim.N;
+    let cloudN = 0;
+    const cInst = this.cloudMesh.instanceColor as THREE.InstancedBufferAttribute;
+    const cArr  = cInst.array as Float32Array;
+    const dim   = N * N * N;
+    for (let c = 0; c < dim; c++) {
+      const q = this.sim.q[c];
+      if (q > 0.92) continue;
+      // Decode cell coords
+      const i = c % N;
+      const j = ((c - i) / N) % N;
+      const k = (c - i - j * N) / (N * N);
+      const s = this.engineToScene(i + 0.5, j + 0.5, k + 0.5);
+      // Mid-depletion → warm; saturated → hot red. Brightness scales with (1-q).
+      const dep = 1 - q;
+      const hot = Math.max(0, 1 - q / 0.35);
+      const r = 0.45 + 0.55 * hot + 0.3 * dep;
+      const g = 0.30 + 0.35 * dep - 0.20 * hot;
+      const b = 0.55 + 0.45 * dep - 0.45 * hot;
+      this.cloudDummy.position.set(s.x, s.y, s.z);
+      this.cloudDummy.scale.setScalar(this.cellSize * (0.85 + 0.6 * dep));
+      this.cloudDummy.updateMatrix();
+      this.cloudMesh.setMatrixAt(cloudN, this.cloudDummy.matrix);
+      cArr[cloudN * 3 + 0] = r;
+      cArr[cloudN * 3 + 1] = Math.max(0, g);
+      cArr[cloudN * 3 + 2] = Math.max(0, b);
+      cloudN++;
+    }
+    this.cloudMesh.count = cloudN;
+    this.cloudMesh.instanceMatrix.needsUpdate = true;
+    cInst.needsUpdate = true;
+
+    // Recompute tetra edge colors using the engine's q field (paper §6 — edges
+    // tinted by their own occupancy variable, now PDE-driven)
+    const cool = new THREE.Color(0x6090c0);
+    const warm = new THREE.Color(0xff9050);
+    const hotC = new THREE.Color(0xff3030);
     let pi = 0, ci = 0;
     for (let t = 0; t < this.tetras.length; t++) {
       const center = this.tetras[t].center;
-      // sample q at each vertex
-      const verts: [number, number, number, number][] = []; // x, y, z, q
+      const verts: [number, number, number, number][] = [];
       for (let v = 0; v < 4; v++) {
         const vx = center.x + this.vertOffsets[(t * 4 + v) * 3 + 0];
         const vy = center.y + this.vertOffsets[(t * 4 + v) * 3 + 1];
         const vz = center.z + this.vertOffsets[(t * 4 + v) * 3 + 2];
-        const q = qField(vx, vy, vz, this.defects);
+        const q = this.qAt(vx, vy, vz);
         verts.push([vx, vy, vz, q]);
       }
       for (const [a, b] of this.edgePairs) {
@@ -191,7 +304,7 @@ export class SubstrateRegime extends Regime {
           const q = v[3];
           let col: THREE.Color;
           if (q > 0.6) col = cool.clone().lerp(warm, (1 - q) / 0.4);
-          else         col = warm.clone().lerp(hot, (0.6 - q) / 0.6);
+          else         col = warm.clone().lerp(hotC, (0.6 - q) / 0.6);
           const intensity = ctx.entanglementOn ? (1.3 - 0.5 * q) : 0.7;
           this.edgeColors[ci++] = col.r * intensity;
           this.edgeColors[ci++] = col.g * intensity;
@@ -234,8 +347,20 @@ export class SubstrateRegime extends Regime {
         this.defectVels[idx][0] = v.x;
         this.defectVels[idx][1] = v.y;
         this.defectVels[idx][2] = v.z;
-        // Moving a defect launches a substrate ripple. Per §17 of the paper
-        // this propagates at c. Visible at "Quantum"-preset slow-mo.
+        // Push velocity into the engine defect (in lattice units / sim sec)
+        const sd = this.simDefects[idx];
+        sd.fixed = false;
+        sd.vx = v.x / this.cellSize;
+        sd.vy = v.y / this.cellSize;
+        sd.vz = v.z / this.cellSize;
+        // Emit a real wave packet on the engine in the release direction —
+        // the visible cloud will show it propagating at lattice-c (paper §17,
+        // D/τ₀ = c²). Plus the cinematic shell overlay for legibility.
+        const speed = Math.hypot(v.x, v.y, v.z);
+        if (speed > 0.05) {
+          const ep = this.sceneToEngine(d.pos[0], d.pos[1], d.pos[2]);
+          this.sim.emitPacket(ep.ex, ep.ey, ep.ez, v.x, v.y, v.z, 0.18, 1.6);
+        }
         this.telegrapher.emit(
           new THREE.Vector3(d.pos[0], d.pos[1], d.pos[2]),
           LATTICE_R * 1.4, 1.0
@@ -253,10 +378,8 @@ export class SubstrateRegime extends Regime {
     if (ud?.type !== 'defect') return null;
     const idx = ud.index as number;
     const d   = this.defects[idx];
-    // q sampled at this defect's center, excluding self
-    const others = this.defects.filter((_, j) => j !== idx);
-    const q     = qField(d.pos[0], d.pos[1], d.pos[2], others);
-    const saturated = q < 0.05;
+    const q   = this.qAt(d.pos[0], d.pos[1], d.pos[2]);
+    const saturated = q < SUB_Q_SAT * 4;
     const rows = [
       { k: 'q (capacity)', v: q.toFixed(3) + (saturated ? ' · saturated' : '') },
       { k: 'Ω_tet',        v: TET_MICROSTATES.toLocaleString() },
