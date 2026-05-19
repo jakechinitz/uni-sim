@@ -47,6 +47,7 @@ export class GalaxyRegime extends Regime {
   private haloMesh: THREE.Sprite;
   private fieldLines: THREE.LineSegments;
   private flMaterial: THREE.LineBasicMaterial;
+  private entGroup!: THREE.Group;
   private picked: THREE.Sprite;
   private focusReticle!: THREE.Sprite;
   private time = 0;
@@ -280,24 +281,34 @@ export class GalaxyRegime extends Regime {
     this.picked.userData = { type: 'star-picker', index: -1 };
     this.scene.add(this.picked);
 
-    // Field lines (entanglement overlay) — outward strands from center
-    const lineCount = 36;
-    const segs = 32;
-    const linePositions = new Float32Array(lineCount * (segs - 1) * 2 * 3);
+    // Entanglement field lines — denser, 3 polar bands so the network reads
+    // as a 3D structure rather than just a flat fan. Parented to a group
+    // we'll position on the central BH each frame so they FOLLOW it when
+    // dragged.
+    const lineCount = 96;
+    const segs = 36;
+    const bands = 3;        // 3 polar bands → fuller-looking 3D network
+    const totSegs = lineCount * bands * (segs - 1);
+    const linePositions = new Float32Array(totSegs * 2 * 3);
     const lineGeom = new THREE.BufferGeometry();
-    for (let l = 0; l < lineCount; l++) {
-      const ang = (l / lineCount) * Math.PI * 2;
-      for (let s = 0; s < segs - 1; s++) {
-        const r1 = (s / segs) * R_GAL * 2.5;
-        const r2 = ((s + 1) / segs) * R_GAL * 2.5;
-        const dy = Math.sin((s / segs) * 6 + l) * 0.4;
-        const off = (l * (segs - 1) + s) * 6;
-        linePositions[off + 0] = r1 * Math.cos(ang);
-        linePositions[off + 1] = dy;
-        linePositions[off + 2] = r1 * Math.sin(ang);
-        linePositions[off + 3] = r2 * Math.cos(ang);
-        linePositions[off + 4] = dy * 1.1;
-        linePositions[off + 5] = r2 * Math.sin(ang);
+    let pi = 0;
+    for (let b = 0; b < bands; b++) {
+      const polar = (b - (bands - 1) / 2) * 0.55;   // -0.55, 0, +0.55 rad
+      const cp = Math.cos(polar), sp = Math.sin(polar);
+      for (let l = 0; l < lineCount; l++) {
+        const ang = (l / lineCount) * Math.PI * 2 + b * 0.13;
+        const ca = Math.cos(ang), sa = Math.sin(ang);
+        for (let s = 0; s < segs - 1; s++) {
+          const r1 = Math.pow(s     / segs, 1.4) * R_GAL * 2.4;
+          const r2 = Math.pow((s+1) / segs, 1.4) * R_GAL * 2.4;
+          const wave = Math.sin((s / segs) * 7 + l * 0.7 + b) * 0.35;
+          linePositions[pi++] = r1 * ca * cp;
+          linePositions[pi++] = r1 * sp + wave;
+          linePositions[pi++] = r1 * sa * cp;
+          linePositions[pi++] = r2 * ca * cp;
+          linePositions[pi++] = r2 * sp + wave * 1.1;
+          linePositions[pi++] = r2 * sa * cp;
+        }
       }
     }
     lineGeom.setAttribute('position', new THREE.BufferAttribute(linePositions, 3));
@@ -306,7 +317,10 @@ export class GalaxyRegime extends Regime {
       blending: THREE.AdditiveBlending, depthWrite: false
     });
     this.fieldLines = new THREE.LineSegments(lineGeom, this.flMaterial);
-    this.scene.add(this.fieldLines);
+    // Group so we can move the entanglement structure with the central BH
+    this.entGroup = new THREE.Group();
+    this.entGroup.add(this.fieldLines);
+    this.scene.add(this.entGroup);
 
     // Telegrapher wave group — emits when objects are flicked
     this.scene.add(this.telegrapher.group);
@@ -401,8 +415,14 @@ export class GalaxyRegime extends Regime {
     const haloPulse = 0.85 + 0.15 * Math.sin(this.wallTime * 0.9);
     (this.haloMesh.material as THREE.SpriteMaterial).opacity =
       ctx.entanglementOn ? (central ? 0.55 * haloPulse : 0.30 * haloPulse) : 0;
-    this.fieldLines.visible = ctx.entanglementOn;
-    this.flMaterial.opacity = ctx.entanglementOn ? 0.4 : 0;
+    // Entanglement network follows the central BH (or origin if none).
+    // Slow rotation to make the field feel alive — drives the visual
+    // "the substrate is restructuring" intuition.
+    if (central) this.entGroup.position.copy(central.mesh.position);
+    else         this.entGroup.position.set(0, 0, 0);
+    this.entGroup.rotation.y = this.wallTime * 0.04;
+    this.entGroup.visible = ctx.entanglementOn;
+    this.flMaterial.opacity = ctx.entanglementOn ? 0.55 * haloPulse : 0;
 
     // Telegrapher waves advance with sim-time (paper §17: D/τ₀ = c²)
     this.telegrapher.update(visDt);

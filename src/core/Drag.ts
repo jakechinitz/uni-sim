@@ -1,18 +1,39 @@
-// Pointer-driven drag system. Raycasts against the current regime's `draggable` group.
-// On hit, locks a drag plane perpendicular to the camera at that depth.
-// pointermove → calls regime's onDragMove with world point on that plane.
-// pointerup → releases with windowed velocity.
+// Pointer-driven drag system.
+//
+// Pickup gesture (deliberate, not twitchy):
+//   1. pointerdown on a draggable arms a "pending pickup" but does NOT
+//      start dragging. The hit object pulses a cyan ring (#cursor.pickup).
+//   2. Pickup commits when EITHER:
+//        - pointer moves more than DRAG_THRESHOLD_PX from the down point, OR
+//        - the pointer is held for HOLD_PICKUP_MS without releasing
+//   3. Release before commit = no-op. The user can click anywhere without
+//      accidentally grabbing nearby objects.
+// Free-space drags (no hit) and wheel events fall through to OrbitControls
+// untouched. While a pending pickup is armed we temporarily disable
+// OrbitControls so it doesn't orbit during the wait.
 
 import * as THREE from 'three';
 import type { DragTarget, HoverInfo } from '../regimes/Regime';
 
-// Loose type for OrbitControls so we don't import three/addons here.
 interface CameraControls { enabled: boolean; }
+
+interface Pending {
+  target: DragTarget;
+  downX: number;
+  downY: number;
+  downT: number;
+  pointerId: number;
+}
+
+const DRAG_THRESHOLD_PX = 6;       // pixels of movement to commit
+const HOLD_PICKUP_MS    = 320;     // ms of hold to commit
 
 export class DragController {
   private raycaster = new THREE.Raycaster();
   private pointerNdc = new THREE.Vector2();
   private active: DragTarget | null = null;
+  private pending: Pending | null = null;
+  private pendingTimer: number | null = null;
   private dragPlane = new THREE.Plane();
   private cursor = document.getElementById('cursor')!;
   private canvas: HTMLCanvasElement;
@@ -22,7 +43,6 @@ export class DragController {
   private controls: CameraControls | null = null;
   onHover: (info: HoverInfo | null, clientX: number, clientY: number) => void = () => {};
 
-  // Called by App when the active OrbitControls instance changes (regime swap)
   attachControls(c: CameraControls | null) { this.controls = c; }
 
   constructor(
@@ -44,7 +64,6 @@ export class DragController {
     const rect = this.canvas.getBoundingClientRect();
     this.pointerNdc.x = ((ev.clientX - rect.left) / rect.width) * 2 - 1;
     this.pointerNdc.y = -((ev.clientY - rect.top) / rect.height) * 2 + 1;
-    // cursor follower
     this.cursor.style.left = `${ev.clientX}px`;
     this.cursor.style.top  = `${ev.clientY}px`;
   }
@@ -64,24 +83,46 @@ export class DragController {
     this.raycaster.setFromCamera(this.pointerNdc, cam);
     const group = this.getDraggables();
     const hits = this.raycaster.intersectObjects(group.children, true);
-    if (hits.length === 0) return;
+    if (hits.length === 0) return;             // free-space click → controls
     const target = this.regimePick(hits[0]);
     if (!target) return;
-    ev.preventDefault();
-    // Stop OrbitControls from also handling this pointerdown
-    ev.stopImmediatePropagation();
-    if (this.controls) this.controls.enabled = false;
+    // ARM a pending pickup. Don't grab yet.
+    this.pending = {
+      target,
+      downX: ev.clientX, downY: ev.clientY,
+      downT: performance.now(),
+      pointerId: ev.pointerId
+    };
+    if (this.controls) this.controls.enabled = false;   // disable orbit during the hold
+    this.cursor.classList.add('pickup');
+    // After HOLD_PICKUP_MS without release, commit even with no movement
+    this.pendingTimer = window.setTimeout(() => {
+      if (this.pending) this.commitPickup();
+    }, HOLD_PICKUP_MS);
+  };
+
+  private commitPickup() {
+    if (!this.pending) return;
+    const target = this.pending.target;
+    this.clearPending();
     this.active = target;
-    // Build a plane through the picked object's world position, facing the camera
+    const cam = this.getCurrentCamera();
     const camDir = new THREE.Vector3();
     cam.getWorldDirection(camDir);
     this.dragPlane.setFromNormalAndCoplanarPoint(camDir.clone().negate(), target.worldPos);
     this.lastWorld.copy(target.worldPos);
     this.velSamples = [{ p: this.lastWorld.clone(), t: performance.now() / 1000 }];
+    this.cursor.classList.remove('pickup');
     this.cursor.classList.add('dragging');
     this.canvas.classList.add('grabbing');
-    try { (ev.target as HTMLElement).setPointerCapture?.(ev.pointerId); } catch {}
-  };
+  }
+
+  private clearPending() {
+    if (this.pendingTimer != null) clearTimeout(this.pendingTimer);
+    this.pendingTimer = null;
+    this.pending = null;
+    this.cursor.classList.remove('pickup');
+  }
 
   private onMove = (ev: PointerEvent) => {
     this.setNdc(ev);
@@ -91,40 +132,55 @@ export class DragController {
       this.active.onDragMove(p);
       this.lastWorld.copy(p);
       this.velSamples.push({ p: p.clone(), t: performance.now() / 1000 });
-      // keep ≤ 80 ms of history
       const cutoff = performance.now() / 1000 - 0.08;
       while (this.velSamples.length > 2 && this.velSamples[0].t < cutoff) this.velSamples.shift();
-    } else {
-      // hover detection — show cursor ring + hover card if over a draggable
-      const cam = this.getCurrentCamera();
-      this.raycaster.setFromCamera(this.pointerNdc, cam);
-      const hits = this.raycaster.intersectObjects(this.getDraggables().children, true);
-      const hit = hits[0];
-      const overDraggable = !!hit && !!this.regimePick(hit);
-      this.cursor.classList.toggle('active', overDraggable);
-      this.canvas.classList.toggle('grab', overDraggable);
-      this.onHover(
-        overDraggable ? this.regimeHover(hit) : null,
-        ev.clientX, ev.clientY
-      );
+      return;
     }
+    if (this.pending) {
+      const dx = ev.clientX - this.pending.downX;
+      const dy = ev.clientY - this.pending.downY;
+      if (dx * dx + dy * dy > DRAG_THRESHOLD_PX * DRAG_THRESHOLD_PX) {
+        this.commitPickup();
+        ev.preventDefault();
+      }
+      return;
+    }
+    // Hover preview (no pending, no active)
+    const cam = this.getCurrentCamera();
+    this.raycaster.setFromCamera(this.pointerNdc, cam);
+    const hits = this.raycaster.intersectObjects(this.getDraggables().children, true);
+    const hit = hits[0];
+    const overDraggable = !!hit && !!this.regimePick(hit);
+    this.cursor.classList.toggle('active', overDraggable);
+    this.canvas.classList.toggle('grab', overDraggable);
+    this.onHover(
+      overDraggable ? this.regimeHover(hit) : null,
+      ev.clientX, ev.clientY
+    );
   };
 
   private onUp = (_ev: PointerEvent) => {
-    if (!this.active) return;
-    // Compute windowed velocity
-    if (this.velSamples.length >= 2) {
-      const a = this.velSamples[0];
-      const b = this.velSamples[this.velSamples.length - 1];
-      const dt = Math.max(1e-3, b.t - a.t);
-      this.velocity.subVectors(b.p, a.p).multiplyScalar(1 / dt);
-    } else {
-      this.velocity.set(0, 0, 0);
+    if (this.active) {
+      // Real drag end → release with inertia
+      if (this.velSamples.length >= 2) {
+        const a = this.velSamples[0];
+        const b = this.velSamples[this.velSamples.length - 1];
+        const dt = Math.max(1e-3, b.t - a.t);
+        this.velocity.subVectors(b.p, a.p).multiplyScalar(1 / dt);
+      } else {
+        this.velocity.set(0, 0, 0);
+      }
+      this.active.onDragEnd(this.velocity);
+      this.active = null;
+      this.cursor.classList.remove('dragging');
+      this.canvas.classList.remove('grabbing');
+      if (this.controls) this.controls.enabled = true;
+      return;
     }
-    this.active.onDragEnd(this.velocity);
-    this.active = null;
-    this.cursor.classList.remove('dragging');
-    this.canvas.classList.remove('grabbing');
-    if (this.controls) this.controls.enabled = true;
+    if (this.pending) {
+      // Released before commit → treat as a click, no-op. Re-enable controls.
+      this.clearPending();
+      if (this.controls) this.controls.enabled = true;
+    }
   };
 }
