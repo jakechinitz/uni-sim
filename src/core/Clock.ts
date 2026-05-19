@@ -9,7 +9,7 @@
 // Each regime is responsible for clamping dtSim per integration step if its
 // orbital physics can't take that step size — see e.g. GalaxyRegime / SystemRegime.
 
-import { T_UNIV, GYR, expToRate, SPEED_EXP_DEFAULT, SPEED_DEAD_ZONE } from '../util/units';
+import { T_UNIV, GYR, expToRate, SPEED_EXP_DEFAULT } from '../util/units';
 import { clamp01 } from '../util/lerp';
 
 export function scrubToTime(s: number): number {
@@ -23,20 +23,35 @@ export function timeToScrub(t: number): number {
 }
 
 export class Clock {
-  scrub = 0;
+  // Cosmic time in Gyr is the source of truth. Floor is 0 (Big Bang);
+  // there is no upper bound — time can run into the heat-death future.
+  // The TIME slider's scrub ∈ [0,1] maps to t ∈ [0, T_UNIV] via the
+  // existing exponential map; past T_UNIV the slider sits at 1.
+  timeGyr = 0;
   speedExp = SPEED_EXP_DEFAULT;
+  direction: 1 | -1 = 1;
   playing = true;
   private prev = performance.now() / 1000;
+  atFloor = false;          // hit t = 0 while rewinding (no further past)
 
-  get time(): number { return scrubToTime(this.scrub); }   // Gyr
-
-  // sim_sec / wall_sec
-  get speed(): number {
-    if (!this.playing) return 0;
-    return expToRate(this.speedExp);
+  // Slider position. Setting it scrubs cosmic time; getting it clamps at 1
+  // once you've drifted past present-day.
+  get scrub(): number {
+    return this.timeGyr <= T_UNIV ? timeToScrub(this.timeGyr) : 1;
+  }
+  set scrub(s: number) {
+    this.timeGyr = scrubToTime(clamp01(s));
   }
 
-  get paused(): boolean { return Math.abs(this.speedExp) < SPEED_DEAD_ZONE; }
+  get time(): number { return this.timeGyr; }
+
+  // sim_sec / wall_sec, signed by direction
+  get speed(): number {
+    if (!this.playing) return 0;
+    return this.direction * expToRate(this.speedExp);
+  }
+
+  get paused(): boolean { return !this.playing; }
 
   tick(): { dtWall: number; dtSim: number } {
     const now = performance.now() / 1000;
@@ -44,10 +59,11 @@ export class Clock {
     this.prev = now;
     if (dtWall > 1 / 30) dtWall = 1 / 30;
     const dtSim = this.speed * dtWall;
+    this.atFloor = false;
     if (dtSim !== 0) {
       const dtGyr = dtSim / GYR;
-      const tNew = Math.max(0, Math.min(T_UNIV, this.time + dtGyr));
-      this.scrub = timeToScrub(tNew);
+      this.timeGyr = Math.max(0, this.timeGyr + dtGyr);
+      if (this.timeGyr <= 0 && this.direction < 0) this.atFloor = true;
     }
     return { dtWall, dtSim };
   }

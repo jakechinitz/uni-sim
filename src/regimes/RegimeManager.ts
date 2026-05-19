@@ -37,11 +37,21 @@ function mixSeed(base: number, ctx: string): number {
   return (base ^ hashStr(ctx)) >>> 0;
 }
 
+// Soft cap on how many distinct (regime, focus) scenes we keep in GPU memory.
+// Most users only ping-pong between the current galaxy and zoomed-out cosmic,
+// so 6 is comfortable headroom without holding many BH disks + star clouds.
+const CACHE_LIMIT = 6;
+
 export class RegimeManager {
   current!: Regime;
   currentKey: RegimeKey = 'COSMIC';
   focus: FocusState = { galaxyId: null, starId: null };
   private currentFocusCtx = '';
+  // LRU cache: cacheKey → {regime, lastUsed}. Recreating GalaxyRegime is
+  // expensive (BH shaders, 6k star buffer, spiral mesh), so we cache rather
+  // than dispose-and-rebuild on every zoom ping-pong.
+  private cache = new Map<string, { regime: Regime; lastUsed: number }>();
+  private accessCounter = 0;
 
   constructor(
     private renderer: THREE.WebGLRenderer,
@@ -54,6 +64,11 @@ export class RegimeManager {
   setSeed(seed: number) {
     this.seed = seed;
     this.focus = { galaxyId: null, starId: null };
+    // Seed change invalidates the whole cache (every regime would need
+    // rebuilding against the new base seed anyway)
+    for (const entry of this.cache.values()) entry.regime.dispose();
+    this.cache.clear();
+    this.current = null as unknown as Regime;
     this.rebuild(this.currentKey);
   }
 
@@ -118,14 +133,35 @@ export class RegimeManager {
   }
 
   private rebuild(key: RegimeKey) {
-    if (this.current) this.current.dispose();
     const fctx = focusContextFor(key, this.focus);
-    const effSeed = mixSeed(this.seed, fctx);
-    const Ctor = REGISTRY[key];
-    const w = this.renderer.domElement.clientWidth;
-    const h = this.renderer.domElement.clientHeight;
-    this.current = new Ctor(w / h, effSeed);
-    this.current.resize(w, h);
+    const cacheKey = `${key}|${fctx}`;
+    let entry = this.cache.get(cacheKey);
+    if (entry) {
+      // Hit — reuse the existing scene, just promote LRU
+      entry.lastUsed = ++this.accessCounter;
+      this.current = entry.regime;
+    } else {
+      // Miss — build, cache. Evict the oldest entry if at the cap.
+      if (this.cache.size >= CACHE_LIMIT) {
+        let oldestKey: string | null = null;
+        let oldestT = Infinity;
+        for (const [k, e] of this.cache) {
+          if (e.lastUsed < oldestT) { oldestT = e.lastUsed; oldestKey = k; }
+        }
+        if (oldestKey) {
+          this.cache.get(oldestKey)!.regime.dispose();
+          this.cache.delete(oldestKey);
+        }
+      }
+      const Ctor = REGISTRY[key];
+      const effSeed = mixSeed(this.seed, fctx);
+      const w = this.renderer.domElement.clientWidth;
+      const h = this.renderer.domElement.clientHeight;
+      const regime = new Ctor(w / h, effSeed);
+      regime.resize(w, h);
+      this.cache.set(cacheKey, { regime, lastUsed: ++this.accessCounter });
+      this.current = regime;
+    }
     this.currentKey = key;
     this.currentFocusCtx = fctx;
   }

@@ -37,20 +37,20 @@ export const SCALE = {
   SUBSTRATE: -16,
 } as const;
 
-// Speed-slider semantics: sim_seconds_per_wall_second. log10 mapping with sign.
-// Range covers ~36 orders of magnitude: from femtoseconds-per-second slow-mo
-// (watch telegrapher waves & photons) up to gigayears-per-second fast-forward
-// (watch the universe evolve). 0 = pause. Default ≈ 10^16.5 ≈ 1 Gyr/s.
+// Speed-slider semantics: PURE LOG-MAGNITUDE of forward sim_sec/wall_sec.
+// Range covers ~36 orders of magnitude. Negative exp = slow-mo forward
+// (Quantum, Light), positive = fast forward (Year/s, Gyr/s). exp = 0 is
+// 1× real time. Pause / rewind are separate states managed by the Clock:
+// pause flips clock.playing; rewind flips clock.direction. This avoids
+// the prior "negative exp = rewind" confusion where Light slow-mo was
+// silently making time run backwards.
 export const SPEED_EXP_MIN = -18;
 export const SPEED_EXP_MAX = 18;
 export const SPEED_EXP_DEFAULT = 16.5;
-export const SPEED_DEAD_ZONE = 0.02; // |exp| smaller than this → paused
 
-// Convert speed-exponent → sim_sec / wall_sec.
+// Convert speed-exponent → sim_sec / wall_sec (always positive forward rate).
 export function expToRate(exp: number): number {
-  if (Math.abs(exp) < SPEED_DEAD_ZONE) return 0;
-  const sign = exp < 0 ? -1 : 1;
-  return sign * Math.pow(10, Math.abs(exp));
+  return Math.pow(10, exp);
 }
 
 // Human-readable formatting of a sim_sec/wall_sec rate.

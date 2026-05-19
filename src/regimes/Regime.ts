@@ -66,12 +66,31 @@ export abstract class Regime {
   }
 
   dispose() {
+    const disposeMat = (m: any) => {
+      if (!m) return;
+      // Plain texture-bearing fields (map, normalMap, alphaMap, ...) on
+      // standard materials
+      for (const k of ['map','alphaMap','normalMap','roughnessMap','metalnessMap','emissiveMap','envMap']) {
+        const t = m[k];
+        if (t && typeof t.dispose === 'function') t.dispose();
+      }
+      // Shader-material uniforms: walk them and dispose any THREE.Texture
+      if (m.uniforms) {
+        for (const u of Object.values(m.uniforms) as any[]) {
+          const v = u?.value;
+          if (v && typeof v.dispose === 'function' && v.isTexture) v.dispose();
+        }
+      }
+      if (typeof m.dispose === 'function') m.dispose();
+    };
     this.scene.traverse(o => {
       const m = (o as any).material;
       const g = (o as any).geometry;
       if (g && typeof g.dispose === 'function') g.dispose();
-      if (Array.isArray(m)) m.forEach(mm => mm.dispose && mm.dispose());
-      else if (m && m.dispose) m.dispose();
+      if (Array.isArray(m)) m.forEach(disposeMat);
+      else disposeMat(m);
     });
+    // Clear scene children so any leftover refs aren't held by Three.js
+    while (this.scene.children.length) this.scene.remove(this.scene.children[0]);
   }
 }
