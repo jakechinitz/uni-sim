@@ -293,10 +293,48 @@ html, body {
 /* Zoom slider with regime band labels stacked underneath. The track-with-
    labels approach lets the user see "I'm in GALAXY" without reading the
    HUD readout. */
-.zoom-slider .zoom-track {
+.zoom-slider .zoom-track,
+.time-slider .time-track {
   flex: 1; min-width: 100px;
   display: flex; flex-direction: column;
   gap: 2px;
+}
+/* Cosmic-epoch tick labels under the time slider. Each .ep is positioned
+   along the track at the scrub value matching its epoch. */
+.time-epochs {
+  position: relative;
+  height: 14px;
+  font-size: 8.5px;
+  color: rgba(255,255,255,0.32);
+  letter-spacing: 0.04em;
+}
+.time-epochs .ep {
+  position: absolute;
+  top: 0;
+  transform: translateX(-50%);
+  cursor: help;
+  user-select: none;
+  white-space: nowrap;
+}
+.time-epochs .ep::before {
+  content: '';
+  position: absolute;
+  top: -4px; left: 50%;
+  width: 1px; height: 4px;
+  background: rgba(255,255,255,0.32);
+}
+.time-epochs .ep:hover {
+  color: var(--accent);
+}
+.time-epochs .ep:hover::before {
+  background: var(--accent);
+}
+.pill-btn.small {
+  height: 22px !important;
+  padding: 0 9px !important;
+  font-size: 10.5px !important;
+  letter-spacing: 0.04em;
+  margin-left: 6px;
 }
 .zoom-bands {
   position: relative;

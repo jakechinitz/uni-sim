@@ -4,3 +4,4 @@ dist/
 *.log
 .vite/
 paper.txt
+_smoke*

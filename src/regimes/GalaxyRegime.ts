@@ -11,6 +11,7 @@ import { Body } from '../core/Gravity';
 import { TelegrapherField } from '../render/Telegrapher';
 import { hawkingSolar, scrambling, formatSI } from '../core/Closure';
 import { M_SUN } from '../util/units';
+import { imfSample, mainSeqLifetime, SUPERNOVA_MASS } from '../core/StellarLifecycle';
 
 // 3500 stars is plenty visually; previous 6000 doubled the per-frame
 // star integration cost without noticeable visual gain.
@@ -32,7 +33,14 @@ interface BHView {
 interface Star {
   body: Body;
   baseColor: THREE.Color;
+  mass: number;        // M☉ — drives lifetime + death channel
+  birth: number;       // cosmic time (Gyr) when this star ignites
+  lifetime: number;    // Gyr — main-sequence span, t ∝ M^−2.5
+  state: 'main' | 'giant' | 'dead';
+  deathT: number;      // cosmic Gyr when it died (Infinity if still alive)
+  spawnedBH: boolean;  // true once we've added a stellar BH from a supernova
 }
+
 
 export class GalaxyRegime extends Regime {
   private stars: Star[] = [];
@@ -134,9 +142,26 @@ export class GalaxyRegime extends Regime {
       mesh.userData = { type: 'bh', index: this.bhs.length };
       this.scene.add(mesh);
       this.draggable.add(mesh);
+      // Initial tangential velocity ≈ Keplerian circular speed around the
+      // central SMBH so the stellar BH starts on roughly-stable orbit.
+      // If there's no central, just sit and feel each other's gravity.
+      let vx = 0, vy = 0, vz = 0;
+      const cMass = this.centralMass();
+      if (cMass > 0) {
+        const vc = this.circularSpeed(r);
+        const sgn = rng() < 0.5 ? -1 : 1;    // mix orbit directions for variety
+        vx = -sgn * Math.sin(ang) * vc;
+        vz =  sgn * Math.cos(ang) * vc;
+      }
       this.bhs.push({
         mesh,
-        body: { id: `bh-stellar-${i}`, pos: [x, y, z], vel: [0, 0, 0], mass: simMass, fixed: true },
+        body: {
+          id: `bh-stellar-${i}`,
+          pos: [x, y, z],
+          vel: [vx, vy, vz],
+          mass: simMass,
+          fixed: false             // stellar BHs are now dynamic
+        },
         mass: simMass,
         realMassSolar: massSolar,
         isCentral: false,
@@ -168,7 +193,9 @@ export class GalaxyRegime extends Regime {
         outerSoft:  { value: 0.96 },
         coreColor:  { value: new THREE.Color('#fff0c8') },
         midColor:   { value: new THREE.Color('#ffaa90') },
-        edgeColor:  { value: new THREE.Color('#7ad7ff') }
+        edgeColor:  { value: new THREE.Color('#7ad7ff') },
+        // Driven by cosmic time so the disk fades up as the galaxy assembles
+        alphaGlobal: { value: 1 }
       },
       vertexShader: /* glsl */`
         varying vec2 vP;
@@ -178,7 +205,7 @@ export class GalaxyRegime extends Regime {
         }
       `,
       fragmentShader: /* glsl */`
-        uniform float time, arms, twist, innerCut, outerSoft;
+        uniform float time, arms, twist, innerCut, outerSoft, alphaGlobal;
         uniform vec3  coreColor, midColor, edgeColor;
         varying vec2 vP;
         float hash(vec2 p){ p=fract(p*vec2(123.34,456.21)); p+=dot(p,p+34.345); return fract(p.x*p.y); }
@@ -204,7 +231,7 @@ export class GalaxyRegime extends Regime {
           float intensity = (0.6 * core + 0.45 * armStr) * disk;
           vec3 col = mix(edgeColor, midColor, smoothstep(0.7, 0.2, t));
           col = mix(col, coreColor, core);
-          gl_FragColor = vec4(col, clamp(intensity, 0.0, 1.0));
+          gl_FragColor = vec4(col, clamp(intensity * alphaGlobal, 0.0, 1.0));
         }
       `
     });
@@ -252,7 +279,19 @@ export class GalaxyRegime extends Regime {
         vel: [tx * vCirc, 0, tz * vCirc],
         mass: 0.0001    // negligible relative to BH; stars are test particles
       };
-      this.stars.push({ body, baseColor: c });
+      // Stellar lifecycle. Mass from Salpeter IMF; birth time spread across
+      // the first 800 Myr so the population doesn't all ignite together
+      // (looks like a sequence of supernovas firing as time advances).
+      const mass = imfSample(rng);
+      const birth = 0.05 + rng() * 0.8;     // Gyr
+      this.stars.push({
+        body, baseColor: c,
+        mass, birth,
+        lifetime: mainSeqLifetime(mass),
+        state: 'main',
+        deathT: Infinity,
+        spawnedBH: false
+      });
     }
 
     this.posAttr = new THREE.BufferAttribute(positions, 3).setUsage(THREE.DynamicDrawUsage);
@@ -340,6 +379,96 @@ export class GalaxyRegime extends Regime {
 
   // Total mass at galactic centre — drives initial circular speeds for star
   // placement. Stellar-mass BHs are negligible vs. the SMBH at this scale.
+  // Coalesce close BH pairs. Sim Schwarzschild radius scales as mass;
+  // when two BHs are within (rs1 + rs2) × buffer, the smaller is absorbed
+  // by the heavier and a telegrapher front rings out from the merger.
+  private mergeBHs() {
+    const RS_SCALE = 0.0035;   // sim units per unit mass (visual choice)
+    const BUFFER   = 4.0;      // merger triggers at a generous multiple
+    let merged = false;
+    outer:
+    for (let i = 0; i < this.bhs.length; i++) {
+      for (let j = i + 1; j < this.bhs.length; j++) {
+        const a = this.bhs[i], b = this.bhs[j];
+        const dx = a.body.pos[0] - b.body.pos[0];
+        const dy = a.body.pos[1] - b.body.pos[1];
+        const dz = a.body.pos[2] - b.body.pos[2];
+        const d2 = dx * dx + dy * dy + dz * dz;
+        const rs = (RS_SCALE * (a.mass + b.mass)) * BUFFER;
+        if (d2 < rs * rs) {
+          // Heavier survives; lighter gets absorbed. Momentum conserved.
+          const keep = a.mass >= b.mass ? a : b;
+          const gone = a.mass >= b.mass ? b : a;
+          const M = keep.mass + gone.mass;
+          for (let k = 0; k < 3; k++) {
+            keep.body.pos[k] = (keep.mass * keep.body.pos[k] + gone.mass * gone.body.pos[k]) / M;
+            keep.body.vel[k] = (keep.mass * keep.body.vel[k] + gone.mass * gone.body.vel[k]) / M;
+          }
+          keep.mass = M;
+          keep.body.mass = M;
+          keep.realMassSolar += gone.realMassSolar;
+          keep.mesh.position.set(keep.body.pos[0], keep.body.pos[1], keep.body.pos[2]);
+          // Merger ringdown — telegrapher front propagating at substrate-c
+          this.telegrapher.emit(keep.mesh.position.clone(), R_GAL * 1.6, 1.4);
+          // Remove the absorbed BH from scene + draggable + bhs[]
+          this.scene.remove(gone.mesh);
+          this.draggable.remove(gone.mesh);
+          gone.mesh.traverse(o => {
+            const g = (o as any).geometry; if (g?.dispose) g.dispose();
+            const m = (o as any).material;
+            if (Array.isArray(m)) m.forEach((x: any) => x.dispose?.());
+            else m?.dispose?.();
+          });
+          this.bhs.splice(this.bhs.indexOf(gone), 1);
+          // Re-index userData so pick/hover still works
+          for (let k = 0; k < this.bhs.length; k++) this.bhs[k].mesh.userData.index = k;
+          merged = true;
+          break outer;
+        }
+      }
+    }
+    return merged;
+  }
+
+  // Core-collapse supernova: take the dying star's position + velocity,
+  // emit a telegrapher ringdown, push a new stellar BH (a few M☉) into the
+  // dynamics. The new BH then orbits / merges with other BHs naturally.
+  private spawnStellarBHFromSupernova(s: Star) {
+    // Remnant mass ≈ 30 % of initial (rest blown off in the explosion)
+    const remMsun  = Math.max(3, s.mass * 0.30);
+    const simMass  = 3 + (remMsun - 3) * 0.5;       // sim-mass scale
+    const radius   = 0.05 + 0.03 * (remMsun / 30);
+    // Younger (hotter) BHs visually
+    const hot = new THREE.Color(1, 0.95, 0.85);
+    const mid = new THREE.Color(1, 0.55, 0.30);
+    const cool = new THREE.Color('#ffa050');
+    const mesh = new BlackHole({
+      radius, diskInner: 2.2, diskOuter: 5.0,
+      diskTilt: Math.random() * Math.PI, hot, mid, cool
+    });
+    mesh.position.set(s.body.pos[0], s.body.pos[1], s.body.pos[2]);
+    mesh.userData = { type: 'bh', index: this.bhs.length };
+    this.scene.add(mesh);
+    this.draggable.add(mesh);
+    this.bhs.push({
+      mesh,
+      body: {
+        id: `bh-sn-${s.body.id}`,
+        pos: [s.body.pos[0], s.body.pos[1], s.body.pos[2]],
+        vel: [s.body.vel[0], s.body.vel[1], s.body.vel[2]],
+        mass: simMass,
+        fixed: false
+      },
+      mass: simMass,
+      realMassSolar: remMsun,
+      isCentral: false,
+      diskTiltAxis: new THREE.Vector3(1, 0, 0),
+      diskTiltAngle: 0
+    });
+    // Supernova ringdown
+    this.telegrapher.emit(mesh.position.clone(), R_GAL * 1.3, 1.2);
+  }
+
   private centralMass(): number {
     const central = this.bhs.find(b => b.isCentral);
     return central?.mass ?? 0;
@@ -365,18 +494,81 @@ export class GalaxyRegime extends Regime {
     this.time += visDt;
     this.wallTime += ctx.dtWall;
     this.spiralMat.uniforms.time.value = this.time;
+    // Cosmic-time-driven assembly: the disk and stars fade up as the
+    // galaxy forms. Roughly: nothing pre-first-stars (≲100 Myr), assembling
+    // through 1 Gyr, fully visible by ~3 Gyr. Past that, slow brightening
+    // tracks SMBH growth.
+    const tG = ctx.time;          // Gyr
+    const galaxyAlpha = Math.min(1, Math.max(0, (tG - 0.1) / 2.0));
+    this.spiralMat.uniforms.alphaGlobal.value = galaxyAlpha;
+    this.starMaterial.opacity = 0.15 + 0.85 * galaxyAlpha;
+    // Central SMBH grows with time (visualised as a slow accretion-disk
+    // scale-up). Multiplier 0.85 → 1.15 over 0..13.8 Gyr.
+    const smbhGrowth = 0.85 + 0.3 * Math.min(1, tG / 13.8);
+    for (const bh of this.bhs) {
+      if (bh.isCentral) bh.mesh.scale.setScalar(smbhGrowth);
+    }
     // Disk toggle — when off, just the stars + BHs are visible (much more
     // legible from below the galactic plane).
-    this.spiralMesh.visible = ctx.diskOn;
+    this.spiralMesh.visible = ctx.diskOn && galaxyAlpha > 0.01;
     for (const b of this.bhs) b.mesh.tick(this.time);
 
-    // Integrate stars under combined BH gravity using RAR. Each star feels
-    // every BH in the galaxy (central SMBH + stellar-mass remnants).
+    // BH-BH gravity (stellar BHs orbit the central SMBH and feel each
+    // other). Simple leapfrog at the same dt as stars; N ≤ 7 so the
+    // O(N²) inner loop is free. After each substep, check for mergers:
+    // if two BHs come within combined Schwarzschild radius, they coalesce
+    // into one body conserving mass + linear momentum, emit a wavefront.
     const sub = 2;
     const dtSim = visDt / sub;
     for (let s = 0; s < sub; s++) {
+      // Compute accelerations on each non-fixed BH from all others
+      const bN = this.bhs.length;
+      const ax = new Float32Array(bN);
+      const ay = new Float32Array(bN);
+      const az = new Float32Array(bN);
+      for (let i = 0; i < bN; i++) {
+        if (this.bhs[i].body.fixed) continue;
+        let aix = 0, aiy = 0, aiz = 0;
+        const bi = this.bhs[i].body;
+        for (let j = 0; j < bN; j++) {
+          if (i === j) continue;
+          const bj = this.bhs[j].body;
+          const rx = bj.pos[0] - bi.pos[0];
+          const ry = bj.pos[1] - bi.pos[1];
+          const rz = bj.pos[2] - bi.pos[2];
+          const r2 = rx * rx + ry * ry + rz * rz + 0.04;
+          const inv_r = 1 / Math.sqrt(r2);
+          const g = G_SIM * bj.mass * inv_r * inv_r;     // strong-field; no MOND between BHs
+          aix += g * rx * inv_r;
+          aiy += g * ry * inv_r;
+          aiz += g * rz * inv_r;
+        }
+        ax[i] = aix; ay[i] = aiy; az[i] = aiz;
+      }
+      for (let i = 0; i < bN; i++) {
+        const b = this.bhs[i].body;
+        if (b.fixed) continue;
+        b.vel[0] += dtSim * ax[i];
+        b.vel[1] += dtSim * ay[i];
+        b.vel[2] += dtSim * az[i];
+        b.pos[0] += dtSim * b.vel[0];
+        b.pos[1] += dtSim * b.vel[1];
+        b.pos[2] += dtSim * b.vel[2];
+      }
+      // Merger pass — if two BHs are within rMerge (proportional to combined
+      // mass), absorb the lighter into the heavier. Momentum-conserving.
+      this.mergeBHs();
+    }
+
+    // Stars under combined BH gravity (RAR — paper §14). Each star feels
+    // every surviving BH (central SMBH + stellar remnants). If a star
+    // wanders inside a BH's tidal radius, it's disrupted: marked dead
+    // (death flash will fire next frame) and the BH disk brightens
+    // transiently.
+    const TIDAL_K = 0.025;      // r_tidal = TIDAL_K * sqrt(M) — visual cue
+    for (let s = 0; s < sub; s++) {
       for (const star of this.stars) {
-        if (star.body.fixed) continue;
+        if (star.body.fixed || star.state === 'dead') continue;
         let ax = 0, ay = 0, az = 0;
         for (const bh of this.bhs) {
           const rx = star.body.pos[0] - bh.body.pos[0];
@@ -384,6 +576,15 @@ export class GalaxyRegime extends Regime {
           const rz = star.body.pos[2] - bh.body.pos[2];
           const r2 = rx * rx + ry * ry + rz * rz + 1e-3;
           const dist = Math.sqrt(r2);
+          // Tidal-disruption: too-close encounter consumes the star
+          const rT = TIDAL_K * Math.sqrt(bh.mass);
+          if (dist < rT) {
+            star.state = 'dead';
+            star.deathT = tG;
+            // Pulse the BH's accretion disk to register the feeding event
+            (bh.mesh as any).feedPulse = ((bh.mesh as any).feedPulse ?? 0) + 0.6;
+            break;
+          }
           const gBar = G_SIM * bh.mass / r2;
           const y    = gBar / A0_SIM;
           const nu   = 0.5 + Math.sqrt(0.25 + 1 / Math.max(y, 1e-30));
@@ -391,6 +592,7 @@ export class GalaxyRegime extends Regime {
           const k    = -gObs / dist;
           ax += k * rx; ay += k * ry; az += k * rz;
         }
+        if (star.state === 'dead') continue;
         star.body.vel[0] += dtSim * ax;
         star.body.vel[1] += dtSim * ay;
         star.body.vel[2] += dtSim * az;
@@ -399,14 +601,82 @@ export class GalaxyRegime extends Regime {
         star.body.pos[2] += dtSim * star.body.vel[2];
       }
     }
-    // Push positions into the point cloud
+    // Push positions + lifecycle-driven colors into the point cloud.
+    // Per-star: compute age, redden+brighten as we approach the lifetime,
+    // then either flash (supernova → spawn a new stellar BH) or fade
+    // (low-mass → white dwarf).
     const arr = this.posAttr.array as Float32Array;
+    const col = this.colAttr.array as Float32Array;
+    const FLASH_DURATION = 0.0008;       // Gyr — supernova visual lasts ~1 Myr
     for (let i = 0; i < this.stars.length; i++) {
-      arr[i * 3 + 0] = this.stars[i].body.pos[0];
-      arr[i * 3 + 1] = this.stars[i].body.pos[1];
-      arr[i * 3 + 2] = this.stars[i].body.pos[2];
+      const s = this.stars[i];
+      arr[i * 3 + 0] = s.body.pos[0];
+      arr[i * 3 + 1] = s.body.pos[1];
+      arr[i * 3 + 2] = s.body.pos[2];
+
+      const age = tG - s.birth;
+      let r = s.baseColor.r, g = s.baseColor.g, b = s.baseColor.b;
+      if (age < 0) {
+        // Pre-ignition (unborn)
+        r = g = b = 0;
+      } else if (s.state === 'main') {
+        const frac = age / s.lifetime;
+        if (frac < 0.85) {
+          // Main sequence — base color (slight blue dim while young)
+          const young = 1 - 0.15 * (1 - frac / 0.85);
+          r *= young; g *= young; b *= young;
+        } else if (frac < 1.0) {
+          // Subgiant → giant: redden and brighten
+          const x = (frac - 0.85) / 0.15;        // 0..1
+          r = r * (1 + 0.6 * x) + 0.4 * x;
+          g = g * (1 + 0.2 * x);
+          b = b * (1 - 0.4 * x);
+          if (frac > 0.97) s.state = 'giant';
+        } else {
+          // Death event begins
+          s.state = 'dead';
+          s.deathT = tG;
+        }
+      }
+      if (s.state === 'giant') {
+        // Late red-giant phase — keep red & bright until death
+        const frac = age / s.lifetime;
+        r = Math.min(1.4, r + 0.5);
+        g = Math.min(0.9, g * 0.6);
+        b = Math.min(0.5, b * 0.4);
+        if (frac > 1.0) { s.state = 'dead'; s.deathT = tG; }
+      }
+      if (s.state === 'dead') {
+        const sinceDeath = tG - s.deathT;
+        if (sinceDeath < FLASH_DURATION) {
+          // Death flash: white-hot for both channels. ACES tone-mapper
+          // turns these HDR values into a clean overexposed dot.
+          const flash = 1 - sinceDeath / FLASH_DURATION;
+          if (s.mass >= SUPERNOVA_MASS) {
+            r = 3 * flash + 1; g = 3 * flash + 0.6; b = 2 * flash + 0.3;
+          } else {
+            // Planetary-nebula style softer flare
+            r = 1.6 * flash + 0.4; g = 1.4 * flash + 0.3; b = 1.0 * flash + 0.5;
+          }
+        } else if (s.mass >= SUPERNOVA_MASS) {
+          // Massive → core-collapse BH. Spawn once, then make star invisible.
+          if (!s.spawnedBH) {
+            s.spawnedBH = true;
+            this.spawnStellarBHFromSupernova(s);
+          }
+          r = g = b = 0;
+        } else {
+          // Low-mass → cooling white dwarf. Tiny, dim, slightly blue.
+          const cooled = Math.exp(-sinceDeath * 0.6);     // fade over Gyr
+          r = 0.30 * cooled; g = 0.40 * cooled; b = 0.55 * cooled;
+        }
+      }
+      col[i * 3 + 0] = r;
+      col[i * 3 + 1] = g;
+      col[i * 3 + 2] = b;
     }
     this.posAttr.needsUpdate = true;
+    this.colAttr.needsUpdate = true;
 
     // BH drag-follow
     for (const bh of this.bhs) {
@@ -500,10 +770,17 @@ export class GalaxyRegime extends Regime {
       worldPos: new THREE.Vector3().copy(bh.mesh.position),
       onDragMove: (p) => {
         bh.body.pos[0] = p.x; bh.body.pos[1] = p.y; bh.body.pos[2] = p.z;
+        // Pin to current position while held — leapfrog acceleration would
+        // otherwise blast the BH around as the user moves it
+        bh.body.fixed = true;
       },
-      onDragEnd: (_v) => {
-        bh.body.vel[0] = bh.body.vel[1] = bh.body.vel[2] = 0;
-        this.telegrapher.emit(bh.mesh.position.clone(), R_GAL * 2.2, 1.0);
+      onDragEnd: (v) => {
+        // Release with the (damped + capped) drag velocity. Central BH
+        // stays gravitationally dominant; stellar BHs go ballistic and
+        // get re-captured by the central if close.
+        bh.body.fixed = bh.isCentral;   // central stays anchored, stellars are free
+        bh.body.vel[0] = v.x; bh.body.vel[1] = v.y; bh.body.vel[2] = v.z;
+        this.telegrapher.emit(bh.mesh.position.clone(), R_GAL * 1.6, 0.8);
       }
     };
   }

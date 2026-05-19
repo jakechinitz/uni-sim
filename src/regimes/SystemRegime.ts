@@ -9,6 +9,8 @@ import { radialGlow } from '../render/Glow';
 import { Body, accelOnRAR, stepLeapfrog } from '../core/Gravity';
 import { TelegrapherField } from '../render/Telegrapher';
 import { PhotonField } from '../render/Photons';
+import { mainSeqLifetime, SUPERNOVA_MASS } from '../core/StellarLifecycle';
+import { BlackHole } from '../render/BlackHole';
 
 const G_SIM     = 4.0;
 const A0_SIM    = 1e-9;     // effectively Newton at this scale
@@ -36,6 +38,15 @@ export class SystemRegime extends Regime {
   private wallTime = 0;
   private telegrapher = new TelegrapherField(30, new THREE.Color(0xffd9a0));
   private starLight!: THREE.PointLight;
+  // Stellar lifecycle — drives the star's visual evolution at SYSTEM scale
+  private starMassMsun = 1.0;
+  private starLifetime = 10;        // Gyr
+  private starBirth    = 0.1;       // Gyr
+  private starBaseScale = 40;
+  private starHotCol  = new THREE.Color('#fffae0');
+  private starMidCol  = new THREE.Color('#ffcc70');
+  private starDied = false;
+  private remnant: BlackHole | null = null;  // post-supernova remnant
   // Photon field — propSpeed 1000 scene-units/sim-sec → visible at "Light"
   // preset (~5 wall-sec to traverse the system), blurs at faster speeds.
   private photons = new PhotonField(800, 1000, 320, new THREE.Color(0xffeac0), 0.7);
@@ -90,22 +101,29 @@ export class SystemRegime extends Regime {
     // Wide range so different focused stars give visibly different systems.
     const stellarType = rng();  // 0..1
     let starMass: number, starHot: string, starMid: string, starCool: string, starScale: number;
+    // Per-seed stellar type drives the system look + the lifetime
     if (stellarType < 0.45) {
-      // M dwarf: small, red, cool
+      // M dwarf: small, red, cool, lives forever
       starMass = 350 + rng() * 200;
       starHot = '#ffe2a8'; starMid = '#ff9858'; starCool = 'rgba(255,80,40,0)';
       starScale = 28;
+      this.starMassMsun = 0.3 + rng() * 0.3;        // ~0.3-0.6 M☉
     } else if (stellarType < 0.85) {
-      // G/K star (Sun-ish): medium, yellow
+      // G/K star (Sun-ish): medium, yellow, ~10 Gyr lifespan
       starMass = 700 + rng() * 600;
       starHot = '#fffae0'; starMid = '#ffcc70'; starCool = 'rgba(255,140,40,0)';
       starScale = 40;
+      this.starMassMsun = 0.8 + rng() * 0.6;        // ~0.8-1.4 M☉
     } else {
-      // O/B giant: large, blue-white, hot
+      // O/B giant: large, blue-white, hot, dies in tens of Myr
       starMass = 1500 + rng() * 1200;
       starHot = '#f0faff'; starMid = '#a8d0ff'; starCool = 'rgba(70,140,255,0)';
       starScale = 65;
+      this.starMassMsun = 8 + rng() * 22;           // ~8-30 M☉ → supernova
     }
+    this.starBaseScale = starScale;
+    this.starLifetime  = mainSeqLifetime(this.starMassMsun);    // Gyr
+    this.starBirth     = 0.05 + rng() * 0.4;
     const N_PLANETS = 3 + Math.floor(rng() * 7);   // 3..9 planets per system
 
     // Central star
@@ -145,13 +163,11 @@ export class SystemRegime extends Regime {
         new THREE.SphereGeometry(radius, 48, 32),
         new THREE.MeshStandardMaterial({
           color: planetCol,
-          // Matte + zero self-glow so the planet's day/night terminator
-          // from the star's PointLight reads cleanly. No emissive means
-          // the night side stays dark, which is what the user wanted
-          // to see.
-          roughness: 0.85,
+          roughness: 0.55,
           metalness: 0.0,
-          emissive: 0x000000
+          emissive: planetCol.clone().multiplyScalar(0.06),
+          transparent: true,
+          opacity: 0
         })
       );
       mesh.userData = { type: 'planet', index: i };
@@ -194,14 +210,14 @@ export class SystemRegime extends Regime {
       this.planets.push(pv);
     }
 
-    // Lighting — bright point at the star, very low ambient so each planet
-    // has a clean day/night terminator. The star's PointLight follows
-    // starBody position; .decay = 1.0 gives a gentler falloff so distant
-    // planets still register a lit side.
-    this.starLight = new THREE.PointLight(0xfff2c8, 9, 4000, 1.0);
+    // Lighting — bright point at the star plus modest ambient so the
+    // dark side of each planet stays visible (not pitch-black). The
+    // ACES tone mapper in App.ts compresses the bright end so cranking
+    // intensity doesn't blow out the lit hemisphere.
+    this.starLight = new THREE.PointLight(0xfff2c8, 30, 4000, 0.9);
     this.starLight.position.set(0, 0, 0);
     this.scene.add(this.starLight);
-    this.scene.add(new THREE.AmbientLight(0x06080d, 0.18));
+    this.scene.add(new THREE.AmbientLight(0x1a1d24, 0.55));
 
     // Entanglement field — dipolar field lines
     const lineCount = 24;
@@ -254,6 +270,52 @@ export class SystemRegime extends Regime {
     // Update visuals
     this.starMesh.position.set(this.starBody.pos[0], this.starBody.pos[1], this.starBody.pos[2]);
     this.starLight.position.copy(this.starMesh.position);
+
+    // Cosmic-time evolution: planets form ~hundreds of Myr after the star
+    // ignites. Fade them in from t = 0.2 Gyr (pre-planet, just star+
+    // accretion disk feel) to t = 0.8 Gyr (fully formed).
+    const sysAlpha = Math.min(1, Math.max(0, (ctx.time - 0.2) / 0.6));
+
+    // -------- Stellar lifecycle --------
+    // The system's central star ages on the cosmic clock. Below ~85 % of
+    // its main-sequence lifetime it looks like itself. From 85 → 100 %
+    // it reddens and bloats (subgiant → red giant). At t > lifetime it
+    // either supernovas into a black hole (for >8 M☉) or fades into a
+    // white dwarf. Planets feel the new lower mass after the death.
+    const starAge  = ctx.time - this.starBirth;
+    const lifeFrac = starAge / this.starLifetime;
+    const starMat  = this.starMesh.material as THREE.SpriteMaterial;
+    if (!this.starDied) {
+      if (lifeFrac < 0.85) {
+        // Main sequence — stable look
+        this.starMesh.scale.setScalar(this.starBaseScale);
+        starMat.color.setRGB(1, 1, 1);
+        starMat.opacity = 1;
+      } else if (lifeFrac < 1.0) {
+        // Subgiant → red giant: bloat to 3-4×, redden, brighten
+        const x = (lifeFrac - 0.85) / 0.15;
+        const scale = this.starBaseScale * (1 + 2.8 * x);
+        this.starMesh.scale.setScalar(scale);
+        starMat.color.setRGB(1.4, 0.55 - 0.25 * x, 0.30 - 0.20 * x);
+      } else {
+        // Death event fires once
+        this.starDied = true;
+        this.killStar();
+      }
+    } else if (this.remnant) {
+      // BH remnant — slowly grows its accretion disk visually
+      this.remnant.tick(this.time);
+    }
+    for (const pv of this.planets) {
+      const m = pv.mesh.material as THREE.MeshStandardMaterial;
+      m.opacity = sysAlpha;
+      if (pv.ring) {
+        const rm = pv.ring.material as THREE.MeshBasicMaterial;
+        rm.opacity = 0.7 * sysAlpha;
+      }
+      // Orbit trail also fades in
+      (pv.trail.material as THREE.LineBasicMaterial).opacity = 0.55 * sysAlpha;
+    }
     for (const pv of this.planets) {
       pv.mesh.position.set(pv.body.pos[0], pv.body.pos[1], pv.body.pos[2]);
       if (pv.ring) pv.ring.rotation.z += visDt * 0.1;
@@ -289,6 +351,55 @@ export class SystemRegime extends Regime {
       radius: 14
     }));
     this.photons.update(visDt, starPos, absorbers);
+  }
+
+  // Star ran out of main-sequence fuel. Massive → core-collapse SN
+  // leaves a stellar BH at the centre + a telegrapher ringdown that
+  // engulfs the inner planets. Low-mass → planetary nebula + a small
+  // bluish white-dwarf sprite. Either way the central gravitating mass
+  // drops to ~30 % of the original, so planet orbits widen.
+  private killStar() {
+    const isSupernova = this.starMassMsun >= SUPERNOVA_MASS;
+    const starMat = this.starMesh.material as THREE.SpriteMaterial;
+    // Fade the original star sprite away
+    starMat.opacity = 0;
+    this.starMesh.visible = false;
+    // Telegrapher ringdown — visible at slow-mo as the death blast
+    this.telegrapher.emit(
+      new THREE.Vector3(this.starBody.pos[0], this.starBody.pos[1], this.starBody.pos[2]),
+      400, isSupernova ? 1.6 : 0.7
+    );
+    if (isSupernova) {
+      // Spawn a proper BH at the star's position. Material/colours match
+      // the hot end of the galaxy-scale stellar BHs.
+      this.remnant = new BlackHole({
+        radius: 2.2, diskInner: 2.6, diskOuter: 6.5,
+        diskTilt: 0.45,
+        hot: new THREE.Color(1, 0.95, 0.85),
+        mid: new THREE.Color(1, 0.55, 0.30),
+        cool: new THREE.Color('#ffa050')
+      });
+      this.remnant.position.set(this.starBody.pos[0], this.starBody.pos[1], this.starBody.pos[2]);
+      this.scene.add(this.remnant);
+      // Light dims after the explosion (BH doesn't emit visible)
+      this.starLight.intensity = 4;
+      this.starLight.color.set(0xff8060);
+    } else {
+      // White-dwarf sprite at 1/8 the scale, bluish-white
+      const wd = new THREE.Sprite(new THREE.SpriteMaterial({
+        map: radialGlow(256, '#ddeeff', '#88aaff', 'rgba(40,80,180,0)'),
+        color: 0xddeeff,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false, transparent: true
+      }));
+      wd.scale.setScalar(this.starBaseScale * 0.22);
+      wd.position.set(this.starBody.pos[0], this.starBody.pos[1], this.starBody.pos[2]);
+      this.scene.add(wd);
+      this.starLight.intensity = 8;
+      this.starLight.color.set(0xccddff);
+    }
+    // Drop the gravitating mass so planets feel a weaker pull and drift
+    this.starBody.mass *= 0.30;
   }
 
   bloomStrength(_ctx: RegimeContext): number {

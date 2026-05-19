@@ -13,6 +13,18 @@ import { updateHoverCard } from './ui/HoverCard';
 import { SaveData, autosave, emptySave, loadLocal } from './core/Store';
 import { DragController } from './core/Drag';
 import { formatRate } from './util/units';
+import type { RegimeKey } from './core/Camera';
+
+// Camera-distance range per regime — wheel zooms within this range, then
+// the slider crosses a band boundary and the next regime mounts with the
+// camera starting at its maxDistance. So scrolling carries you seamlessly
+// through cosmic → galaxy → system → substrate.
+const REGIME_LIMITS: Record<RegimeKey, { min: number; max: number }> = {
+  COSMIC:    { min: 12,  max: 200 },
+  GALAXY:    { min: 5,   max: 80  },
+  SYSTEM:    { min: 35,  max: 550 },
+  SUBSTRATE: { min: 6,   max: 45  },
+};
 
 export class App {
   private renderer: THREE.WebGLRenderer;
@@ -34,6 +46,12 @@ export class App {
     });
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     this.renderer.setClearColor(0x000000, 1);
+    // HDR tone mapping. Without this, the bright PointLight in SystemRegime
+    // clips planet surface colors to white near the star and pitch-black
+    // far away. ACESFilmic compresses the high end so we can crank the
+    // light intensity without losing detail.
+    this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    this.renderer.toneMappingExposure = 1.05;
     this.resize();
 
     // Pristine state, then overlay any save
@@ -117,6 +135,9 @@ export class App {
     });
 
     window.addEventListener('resize', () => this.resize());
+    // Wheel anywhere on the canvas → unified zoom slider. OrbitControls'
+    // own wheel-zoom is disabled in installControls so they don't fight.
+    canvas.addEventListener('wheel', this.onWheel, { passive: false });
 
     this.loop();
   }
@@ -128,31 +149,72 @@ export class App {
     if (this.regimes)  this.regimes.resize(w, h);
   }
 
-  // OrbitControls swap when regime changes. Damped orbit, dolly with wheel,
-  // right-click pan. Each regime has its own scale so distance limits adapt.
+  // OrbitControls per regime — handles left-drag orbit + right-drag pan.
+  // Wheel zoom is OFF; instead the wheel adjusts the unified zoom slider
+  // (see onWheel below) so scrolling carries you through regimes
+  // continuously. Camera distance is derived from the slider each frame
+  // in `applySliderDistance`.
   private installControls() {
+    // Preserve view direction across regime swaps so the camera glides
+    // into the next regime pointed at the same focused thing.
+    const oldDir = this.controls
+      ? this.controls.object.position.clone().sub(this.controls.target).normalize()
+      : null;
     if (this.controls) this.controls.dispose();
     this.controls = new OrbitControls(this.regimes.current.camera, this.canvas);
     this.controls.enableDamping = true;
     this.controls.dampingFactor = 0.08;
+    this.controls.enableZoom = false;          // we own the wheel
     this.controls.enablePan = true;
     this.controls.screenSpacePanning = true;
     this.controls.rotateSpeed = 0.5;
-    this.controls.zoomSpeed = 1.1;
     this.controls.panSpeed = 0.8;
     this.controls.target.set(0, 0, 0);
-    // Per-regime dolly range so wheel-zoom feels right at each scale
-    const limits: Record<string, { min: number; max: number }> = {
-      COSMIC:    { min: 8,  max: 220 },
-      GALAXY:    { min: 1,  max: 90  },
-      SYSTEM:    { min: 10, max: 700 },
-      SUBSTRATE: { min: 4,  max: 60  },
-    };
-    const lim = limits[this.regimes.currentKey] ?? { min: 1, max: 1000 };
-    this.controls.minDistance = lim.min;
-    this.controls.maxDistance = lim.max;
+    if (oldDir) {
+      const lim = REGIME_LIMITS[this.regimes.currentKey];
+      const startDist = lim.max * 0.95;
+      this.regimes.current.camera.position.copy(oldDir.multiplyScalar(startDist));
+      this.regimes.current.camera.lookAt(this.controls.target);
+    }
+    this.controls.update();
     if (this.drag) this.drag.attachControls(this.controls);
   }
+
+  // Each frame: pin the camera at the radial distance the zoom slider
+  // implies, preserving the orbit direction. This lets the wheel drive the
+  // slider (which advances regimes seamlessly) while OrbitControls still
+  // owns the orbital direction + pan.
+  private applySliderDistance() {
+    const slice = decodeZoom(this.state.zoom);
+    const lim = REGIME_LIMITS[slice.regime];
+    // intra=0 = zoomed all the way out (camera at max distance)
+    // intra=1 = zoomed all the way in (camera at min distance, about to cross)
+    const dist = lim.max - (lim.max - lim.min) * slice.intra;
+    const cam = this.regimes.current.camera;
+    const dir = cam.position.clone().sub(this.controls.target);
+    const curLen = dir.length();
+    if (curLen < 1e-6) return;
+    dir.multiplyScalar(dist / curLen);
+    cam.position.copy(this.controls.target).add(dir);
+  }
+
+  // Wheel input is intercepted by the canvas listener (see constructor)
+  // and routed into the unified zoom slider. deltaY < 0 (scroll up) = zoom
+  // in. The slider's onChange handler in bindUI updates regime + camera
+  // distance via the normal pipeline.
+  private onWheel = (ev: WheelEvent) => {
+    ev.preventDefault();
+    // Per-pixel wheel deltas vary by device. Tuned so a single mouse-wheel
+    // notch (deltaY ≈ 100) moves the slider by ~0.02, meaning ~12 notches
+    // to cross one regime band. Feels comparable to slider drag speed.
+    const SENS = 0.00018;
+    let z = this.state.zoom - ev.deltaY * SENS;
+    z = Math.max(0, Math.min(0.9995, z));
+    if (z === this.state.zoom) return;
+    this.state.zoom = z;
+    const sl = document.getElementById('slider-zoom') as HTMLInputElement;
+    if (sl) sl.value = String(z);
+  };
 
   private loop = () => {
     requestAnimationFrame(this.loop);
@@ -190,7 +252,10 @@ export class App {
       focus: this.regimes.focus
     }, dtSim);
 
-    if (this.controls) this.controls.update();
+    if (this.controls) {
+      this.controls.update();
+      this.applySliderDistance();
+    }
     this.regimes.render(dtWall);
 
     // HUD
