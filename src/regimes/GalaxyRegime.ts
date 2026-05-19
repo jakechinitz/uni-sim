@@ -295,11 +295,15 @@ export class GalaxyRegime extends Regime {
       positions[i * 3 + 1] = y;
       positions[i * 3 + 2] = z;
 
-      // Color by radius (hot blue inner, warm yellow/red outer)
+      // Color by radius (hot blue inner, warm yellow/red outer).
+      // ~6% of stars get an HDR boost (>1.0) so they punch through the
+      // ACES tonemap as bright sparkle — reads as the brightest local
+      // suns, makes the disk feel populated rather than dust-like.
       const hue = (r < 4) ? 0.07 + 0.05 * rng() : 0.58 + 0.08 * rng();
       const sat = 0.5 + 0.3 * rng();
-      const lit = 0.65 + 0.25 * rng();
+      const lit = 0.78 + 0.22 * rng();
       const c = new THREE.Color().setHSL(hue, sat, lit);
+      if (rng() < 0.06) c.multiplyScalar(1.8);
       colors[i * 3 + 0] = c.r;
       colors[i * 3 + 1] = c.g;
       colors[i * 3 + 2] = c.b;
@@ -334,10 +338,11 @@ export class GalaxyRegime extends Regime {
     this.starGeom.setAttribute('color', this.colAttr);
 
     this.starMaterial = new THREE.PointsMaterial({
-      // Slightly larger star points so individual stars register
-      // even when the camera is mid-zoom; with the additive blend
-      // they still composite cleanly into a continuous disk.
-      size: 0.11, sizeAttenuation: true,
+      // Each point is a whole solar system. Bumped to 0.15 so individual
+      // stars register against the SMBH's bulk and the spiral disk; with
+      // additive blending and ACES tonemap they still composite cleanly
+      // into a continuous disk at zoom-out.
+      size: 0.15, sizeAttenuation: true,
       vertexColors: true,
       transparent: true, depthWrite: false, opacity: 1.0,
       blending: THREE.AdditiveBlending,

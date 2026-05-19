@@ -74,8 +74,10 @@ export class BlackHole extends THREE.Group {
           // Far-field q damps the ring: when the surroundings are
           // already drained (nearby companion) the photon ring fades —
           // paper §strong-field lapse N²=q applied to the ring photons.
+          // Multiplier dropped from 2.6 → 1.8 so the SMBH doesn't drown
+          // out the stars / solar systems orbiting it.
           float lapse = clamp(localQ, 0.05, 1.0);
-          gl_FragColor = vec4(color, ring * 2.6 * lapse);
+          gl_FragColor = vec4(color, ring * 1.8 * lapse);
         }
       `
     });
