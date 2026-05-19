@@ -139,6 +139,13 @@ export class App {
     // own wheel-zoom is disabled in installControls so they don't fight.
     canvas.addEventListener('wheel', this.onWheel, { passive: false });
 
+    // Substrate info panel + packet emitter button
+    const emitBtn = document.getElementById('btn-emit-packet');
+    if (emitBtn) emitBtn.addEventListener('click', () => {
+      const cur = this.regimes.current as unknown as { emitTelegrapherPacket?: () => void };
+      cur.emitTelegrapherPacket?.();
+    });
+
     this.loop();
   }
 
@@ -228,6 +235,12 @@ export class App {
     const tGyr = this.clock.time;
     // Big-bang flash whenever we arrive at t≈0 from elsewhere
     if (this.prevTime > 1e-3 && tGyr < 1e-6) this.composer.flash(1.0);
+    // Recombination beat (~380 kyr) — universe transparent. Fires when
+    // crossing t = 3.8e-4 Gyr in the forward direction.
+    const T_RECOMB = 3.8e-4;
+    if (this.prevTime < T_RECOMB && tGyr >= T_RECOMB && this.clock.direction > 0) {
+      this.composer.flash(0.45);
+    }
     this.prevTime = tGyr;
 
     const ede  = edePulse(tGyr);
@@ -276,6 +289,24 @@ export class App {
       speed: formatRate(this.clock.speed),
       epoch: ep.label
     });
+
+    // Substrate info panel — visible only at SUBSTRATE scale
+    const spPanel = document.getElementById('substrate-panel');
+    if (spPanel) {
+      const atSub = slice.regime === 'SUBSTRATE';
+      spPanel.classList.toggle('hidden', !atSub);
+      if (atSub) {
+        const cur = this.regimes.current as unknown as {
+          totalCellCount?: () => number; saturatedCellCount?: () => number;
+        };
+        const total = cur.totalCellCount?.() ?? 0;
+        const sat   = cur.saturatedCellCount?.() ?? 0;
+        const c = document.getElementById('sp-cells');
+        const s = document.getElementById('sp-saturated');
+        if (c) c.textContent = total.toLocaleString();
+        if (s) s.textContent = `${sat} / ${total.toLocaleString()}`;
+      }
+    }
 
     // Autosave only every ~1.5 sec wall time, not every frame. The
     // throttle inside autosave() collapsed bursts but still fired the

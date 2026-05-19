@@ -382,6 +382,31 @@ export class SubstrateRegime extends Regime {
     };
   }
 
+  // Public packet emitter for the UI button. Injects a Gaussian
+  // wavepacket in (q, Π) at the lattice center with a random unit
+  // direction so successive presses give visually distinct fronts.
+  emitTelegrapherPacket() {
+    const N = this.sim.N;
+    const u = Math.random() * 2 - 1;
+    const t = Math.random() * Math.PI * 2;
+    const sN = Math.sqrt(1 - u * u);
+    this.sim.emitPacket(
+      N / 2, N / 2, N / 2,
+      sN * Math.cos(t), u, sN * Math.sin(t),
+      0.28, 1.6
+    );
+    // Decorative shell at the same center so the moment is legible at
+    // any speed even before the lattice cloud catches up.
+    this.telegrapher.emit(new THREE.Vector3(0, 0, 0), LATTICE_R * 1.4, 0.9);
+  }
+
+  // Number of saturated (q < Q_SAT) lattice cells — surfaced to the
+  // substrate info panel.
+  saturatedCellCount(): number {
+    return Math.round(this.sim.saturationFraction() * this.sim.q.length);
+  }
+  totalCellCount(): number { return this.sim.q.length; }
+
   hudExtras(): string {
     return `tetra · 4 faces × 7 states · Ω=${TET_MICROSTATES} · g_share≈${G_SHARE_EFF}`;
   }
