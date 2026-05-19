@@ -71,9 +71,12 @@ export class Composer {
             vec2 d = vec2((uv.x - c.x) * aspect, uv.y - c.y);
             float r = length(d);
             float R = bhRadii[i];
-            if (r > 1e-4 && r < R * 6.0) {
-              // Deflection: outward direction, magnitude R²/r capped to 0.9·R
-              float defl = clamp(R * R / r, 0.0, R * 0.9);
+            // Only apply within ~3·R so distant BHs don't blanket-warp
+            // each other. The R²/r kernel falls off naturally, but adding
+            // a smooth-step taper keeps the boundary clean.
+            if (r > 1e-4 && r < R * 3.0) {
+              float taper = 1.0 - smoothstep(R * 2.0, R * 3.0, r);
+              float defl = clamp(R * R / r, 0.0, R * 0.8) * taper;
               vec2 off = (d / r) * defl;
               uv.x -= off.x / aspect;
               uv.y -= off.y;
