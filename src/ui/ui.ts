@@ -28,20 +28,29 @@ export function bindUI(cb: UICallbacks) {
   const togEnt      = el<HTMLInputElement>('toggle-entangle');
   const togBlm      = el<HTMLInputElement>('toggle-bloom');
 
-  // Init from state
-  sliderTime.value  = String(cb.state.scrub);
-  sliderZoom.value  = String(cb.state.zoom);
-  sliderSpeed.value = String(cb.state.speedExp);
-  togEnt.checked    = cb.state.toggles.entangle;
-  togBlm.checked    = cb.state.toggles.bloom;
-  paintTransport();
-
+  // Init from state. paintTransport / refreshPresetState rely on `chips`
+  // being declared, so we set up the chip refs BEFORE the first repaint
+  // (otherwise we hit a TDZ error and the whole app fails to boot).
+  const chips = document.querySelectorAll<HTMLButtonElement>('#speed-presets .chip');
+  function refreshPresetState(exp: number) {
+    chips.forEach(ch => {
+      const v = parseFloat(ch.dataset.exp ?? '');
+      ch.classList.toggle('on', Math.abs(v - exp) < 0.05);
+    });
+  }
   function paintTransport() {
     btnPlay.textContent = cb.state.playing ? '⏸' : '▶';
     btnRew.classList.toggle('on', cb.state.direction === -1 && cb.state.playing);
     btnFwd.classList.toggle('on', cb.state.direction ===  1 && cb.state.playing);
     refreshPresetState(cb.state.speedExp);
   }
+
+  sliderTime.value  = String(cb.state.scrub);
+  sliderZoom.value  = String(cb.state.zoom);
+  sliderSpeed.value = String(cb.state.speedExp);
+  togEnt.checked    = cb.state.toggles.entangle;
+  togBlm.checked    = cb.state.toggles.bloom;
+  paintTransport();
 
   sliderTime.addEventListener('input', () => {
     cb.state.scrub = parseFloat(sliderTime.value);
@@ -78,13 +87,6 @@ export function bindUI(cb: UICallbacks) {
   });
 
   // Speed preset chips (snap the slider to a named rate)
-  const chips = document.querySelectorAll<HTMLButtonElement>('#speed-presets .chip');
-  function refreshPresetState(exp: number) {
-    chips.forEach(ch => {
-      const v = parseFloat(ch.dataset.exp ?? '');
-      ch.classList.toggle('on', Math.abs(v - exp) < 0.05);
-    });
-  }
   chips.forEach(ch => {
     ch.addEventListener('click', () => {
       const v = parseFloat(ch.dataset.exp ?? '');
