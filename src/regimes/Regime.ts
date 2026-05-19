@@ -8,6 +8,7 @@ import * as THREE from 'three';
 export interface FocusState {
   galaxyId: string | null;     // ID of the cosmic-web galaxy you're inside
   starId:   string | null;     // ID of the galactic star you're inside
+  planetId: string | null;     // ID of the planet you've drilled into (SYSTEM → PLANET)
 }
 
 export interface RegimeContext {

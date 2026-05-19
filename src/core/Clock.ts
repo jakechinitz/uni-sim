@@ -31,6 +31,13 @@ export class Clock {
   speedExp = SPEED_EXP_DEFAULT;
   direction: 1 | -1 = 1;
   playing = true;
+  // Log-pace mode: the play head advances the SCRUB linearly (not the
+  // cosmic time). Because scrub→time is exponential (K=8), this gives
+  // every decade of cosmic history roughly equal wall-time visibility —
+  // ideal for the Big Bang button. logPaceWallSec controls how long
+  // the whole 0→13.8 Gyr sweep takes in wall-clock seconds.
+  useLogPace = false;
+  logPaceWallSec = 35;
   private prev = performance.now() / 1000;
   atFloor = false;          // hit t = 0 while rewinding (no further past)
 
@@ -58,8 +65,22 @@ export class Clock {
     let dtWall = now - this.prev;
     this.prev = now;
     if (dtWall > 1 / 30) dtWall = 1 / 30;
-    const dtSim = this.speed * dtWall;
     this.atFloor = false;
+
+    // Log-pace mode: forward-only, advances the SCRUB linearly so the
+    // exponential scrub→time map spreads early-universe history across
+    // many wall-seconds. dtSim is then the implied cosmic-time advance,
+    // which downstream regimes still clamp internally.
+    if (this.useLogPace && this.playing && this.direction === 1) {
+      const prevTime = this.timeGyr;
+      const newScrub = Math.min(1, this.scrub + dtWall / this.logPaceWallSec);
+      this.scrub = newScrub;
+      if (newScrub >= 1) this.useLogPace = false;   // ride out into normal-speed
+      const dtSim = Math.max(0, this.timeGyr - prevTime) * GYR;
+      return { dtWall, dtSim };
+    }
+
+    const dtSim = this.speed * dtWall;
     if (dtSim !== 0) {
       const dtGyr = dtSim / GYR;
       this.timeGyr = Math.max(0, this.timeGyr + dtGyr);

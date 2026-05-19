@@ -175,26 +175,13 @@ export class DragController {
 
   private onUp = (_ev: PointerEvent) => {
     if (this.active) {
-      // Compute release velocity from windowed samples, then damp + cap.
-      // Why both: any wiggle at the moment of release was being amplified
-      // by 1/dt and shot the object out of frame. Damping × 0.35 makes
-      // a gentle flick feel like a gentle flick. The magnitude cap is
-      // proportional to camera distance so the same drag at COSMIC
-      // doesn't go further off-screen than the same drag at GALAXY.
-      if (this.velSamples.length >= 2) {
-        const a = this.velSamples[0];
-        const b = this.velSamples[this.velSamples.length - 1];
-        const dt = Math.max(1e-3, b.t - a.t);
-        this.velocity.subVectors(b.p, a.p).multiplyScalar(1 / dt);
-      } else {
-        this.velocity.set(0, 0, 0);
-      }
-      this.velocity.multiplyScalar(0.35);
-      const camDist = this.getCurrentCamera().position.length();
-      const maxV = Math.max(1, camDist * 0.6);
-      if (this.velocity.length() > maxV) {
-        this.velocity.setLength(maxV);
-      }
+      // Release with zero velocity — the object stays where the user
+      // dropped it, then the surrounding dynamics (gravity, RAR pull,
+      // substrate ∇q) take over from rest. Previously we passed a
+      // damped flick velocity, which made every release feel like a
+      // throw. Telegrapher ringdowns are still emitted by each regime's
+      // onDragEnd so the moment of release is still visually marked.
+      this.velocity.set(0, 0, 0);
       this.active.onDragEnd(this.velocity);
       this.active = null;
       this.cursor.classList.remove('dragging');

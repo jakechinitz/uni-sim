@@ -7,7 +7,7 @@ import { mulberry32 } from '../core/Rng';
 import { hashStr } from '../util/hash';
 import { radialGlow } from '../render/Glow';
 import { BlackHole } from '../render/BlackHole';
-import { Body } from '../core/Gravity';
+import { Body, nuRAR } from '../core/Gravity';
 import { TelegrapherField } from '../render/Telegrapher';
 import { ManyPasts } from '../render/ManyPasts';
 import { hawkingSolar, scrambling, formatSI } from '../core/Closure';
@@ -29,6 +29,24 @@ interface BHView {
   isCentral: boolean;
   diskTiltAxis: THREE.Vector3;
   diskTiltAngle: number;
+  entHalo: THREE.Sprite; // per-BH entanglement halo — parented to mesh
+                         // so dragging the BH moves its halo with it.
+}
+
+// Build a soft entanglement halo sprite for a BH. Additive blend so it
+// reads as a glow on the disk/stars behind it; opacity is driven each
+// frame by ctx.entanglementOn × mass × pulse so each BH visually
+// announces its drained capacity well.
+function makeBHHalo(scaleHint: number): THREE.Sprite {
+  const halo = new THREE.Sprite(new THREE.SpriteMaterial({
+    map: radialGlow(256, 'rgba(0,0,0,0)', 'rgba(122,215,255,0.55)', 'rgba(122,215,255,0)'),
+    color: 0x7ad7ff,
+    blending: THREE.AdditiveBlending,
+    depthWrite: false, transparent: true,
+    opacity: 0
+  }));
+  halo.scale.setScalar(scaleHint);
+  return halo;
 }
 
 interface Star {
@@ -110,6 +128,10 @@ export class GalaxyRegime extends Regime {
       mesh.userData = { type: 'bh', index: 0 };
       this.scene.add(mesh);
       this.draggable.add(mesh);
+      // Central halo: large (proportional to SMBH mass), parented so it
+      // moves with the BH when dragged. Opacity driven in update().
+      const halo = makeBHHalo(R_GAL * 1.8);
+      mesh.add(halo);
       this.bhs.push({
         mesh,
         body: { id: 'bh-central', pos: [cx, 0, cz], vel: [0, 0, 0], mass: simMass, fixed: true },
@@ -117,7 +139,8 @@ export class GalaxyRegime extends Regime {
         realMassSolar: massSolar,
         isCentral: true,
         diskTiltAxis: new THREE.Vector3(1, 0, 0),
-        diskTiltAngle: tilt
+        diskTiltAngle: tilt,
+        entHalo: halo
       });
     }
 
@@ -161,6 +184,8 @@ export class GalaxyRegime extends Regime {
         vx = -sgn * Math.sin(ang) * vc;
         vz =  sgn * Math.cos(ang) * vc;
       }
+      const halo = makeBHHalo(2.5 + 0.35 * Math.log(Math.max(massSolar, 1)));
+      mesh.add(halo);
       this.bhs.push({
         mesh,
         body: {
@@ -174,7 +199,8 @@ export class GalaxyRegime extends Regime {
         realMassSolar: massSolar,
         isCentral: false,
         diskTiltAxis: new THREE.Vector3(1, 0, 0),
-        diskTiltAngle: tilt
+        diskTiltAngle: tilt,
+        entHalo: halo
       });
     }
 
@@ -308,7 +334,10 @@ export class GalaxyRegime extends Regime {
     this.starGeom.setAttribute('color', this.colAttr);
 
     this.starMaterial = new THREE.PointsMaterial({
-      size: 0.08, sizeAttenuation: true,
+      // Slightly larger star points so individual stars register
+      // even when the camera is mid-zoom; with the additive blend
+      // they still composite cleanly into a continuous disk.
+      size: 0.11, sizeAttenuation: true,
       vertexColors: true,
       transparent: true, depthWrite: false, opacity: 1.0,
       blending: THREE.AdditiveBlending,
@@ -508,6 +537,8 @@ export class GalaxyRegime extends Regime {
     mesh.userData = { type: 'bh', index: this.bhs.length };
     this.scene.add(mesh);
     this.draggable.add(mesh);
+    const halo = makeBHHalo(2 + 0.3 * Math.log(Math.max(remMsun, 1)));
+    mesh.add(halo);
     this.bhs.push({
       mesh,
       body: {
@@ -521,7 +552,8 @@ export class GalaxyRegime extends Regime {
       realMassSolar: remMsun,
       isCentral: false,
       diskTiltAxis: new THREE.Vector3(1, 0, 0),
-      diskTiltAngle: 0
+      diskTiltAngle: 0,
+      entHalo: halo
     });
     // Supernova ringdown
     this.telegrapher.emit(mesh.position.clone(), R_GAL * 1.3, 1.2);
@@ -534,13 +566,13 @@ export class GalaxyRegime extends Regime {
 
   private circularSpeed(r: number): number {
     // RAR-consistent circular speed: v² / r = g_obs from central baryonic mass.
+    // Uses the same paper-faithful exponential RAR as the rest of the sim.
     // If there's no central SMBH, use a soft bulge mass so outer rotation curve
     // still falls into deep-MOND naturally (paper §14: Tully–Fisher follows).
     const M = Math.max(this.centralMass(), 60);
     const gBar = G_SIM * M / Math.max(r * r, 1e-3);
     const y = gBar / A0_SIM;
-    const nu = 0.5 + Math.sqrt(0.25 + 1 / Math.max(y, 1e-30));
-    const gObs = nu * gBar;
+    const gObs = nuRAR(y) * gBar;
     return Math.sqrt(gObs * Math.max(r, 0.1));
   }
 
@@ -559,7 +591,11 @@ export class GalaxyRegime extends Regime {
     const tG = ctx.time;          // Gyr
     const galaxyAlpha = Math.min(1, Math.max(0, (tG - 0.1) / 2.0));
     this.spiralMat.uniforms.alphaGlobal.value = galaxyAlpha;
-    this.starMaterial.opacity = 0.15 + 0.85 * galaxyAlpha;
+    // Bumped baseline from 0.15 — at low galaxyAlpha (early in cosmic time
+    // or as a freshly-mounted regime) stars were so faint that with bloom
+    // off the disk looked empty. 0.45 lets the dimmest unborn stars still
+    // glint.
+    this.starMaterial.opacity = 0.45 + 0.55 * galaxyAlpha;
     // Central SMBH grows with time (visualised as a slow accretion-disk
     // scale-up). Multiplier 0.85 → 1.15 over 0..13.8 Gyr.
     const smbhGrowth = 0.85 + 0.3 * Math.min(1, tG / 13.8);
@@ -645,8 +681,7 @@ export class GalaxyRegime extends Regime {
           }
           const gBar = G_SIM * bh.mass / r2;
           const y    = gBar / A0_SIM;
-          const nu   = 0.5 + Math.sqrt(0.25 + 1 / Math.max(y, 1e-30));
-          const gObs = nu * gBar;
+          const gObs = nuRAR(y) * gBar;
           const k    = -gObs / dist;
           ax += k * rx; ay += k * ry; az += k * rz;
         }
@@ -745,12 +780,45 @@ export class GalaxyRegime extends Regime {
     for (const bh of this.bhs) {
       bh.mesh.position.set(bh.body.pos[0], bh.body.pos[1], bh.body.pos[2]);
     }
+    // Compute the far-field q at each BH's location from every OTHER BH.
+    // q(r) = max(0, 1 − Σ rs_j / r_ij) — paper's substrate primitive.
+    // Feed it into each BH's photon ring so close BH pairs visibly dim
+    // each other's rings (paper's N²=q lapse made visible).
+    const RS_LAPSE = 0.18;        // sim units per unit mass for the lapse
+    for (let i = 0; i < this.bhs.length; i++) {
+      const bi = this.bhs[i];
+      let drain = 0;
+      for (let j = 0; j < this.bhs.length; j++) {
+        if (i === j) continue;
+        const bj = this.bhs[j];
+        const dx = bi.body.pos[0] - bj.body.pos[0];
+        const dy = bi.body.pos[1] - bj.body.pos[1];
+        const dz = bi.body.pos[2] - bj.body.pos[2];
+        const dist = Math.sqrt(dx*dx + dy*dy + dz*dz) + 1e-3;
+        drain += RS_LAPSE * Math.sqrt(bj.mass) / dist;
+      }
+      bi.mesh.setLocalQ(Math.max(0.05, 1 - drain));
+    }
     // Halo follows the central BH if one exists; otherwise dim halo at origin
     const central = this.bhs.find(b => b.isCentral);
     this.haloMesh.position.copy(central ? central.mesh.position : new THREE.Vector3());
     const haloPulse = 0.85 + 0.15 * Math.sin(this.wallTime * 0.9);
     (this.haloMesh.material as THREE.SpriteMaterial).opacity =
       ctx.entanglementOn ? (central ? 0.55 * haloPulse : 0.30 * haloPulse) : 0;
+    // Per-BH halos: every BH gets its own entanglement signature, so
+    // dragging a stellar BH carries its halo along (children inherit
+    // the BH group's transform). Brightness scales with √M so the
+    // SMBH dominates without drowning out the stellar remnants.
+    for (let i = 0; i < this.bhs.length; i++) {
+      const bh = this.bhs[i];
+      const mat = bh.entHalo.material as THREE.SpriteMaterial;
+      if (!ctx.entanglementOn) { mat.opacity = 0; continue; }
+      // Per-BH pulse offset by index so halos breathe out of sync —
+      // makes the field network read as alive, not a static wash.
+      const pulse = 0.78 + 0.22 * Math.sin(this.wallTime * 1.2 + i * 0.9);
+      const strength = bh.isCentral ? 0.55 : 0.35;
+      mat.opacity = strength * pulse;
+    }
     // Entanglement network follows the central BH (or origin if none).
     // Slow rotation to make the field feel alive — drives the visual
     // "the substrate is restructuring" intuition.

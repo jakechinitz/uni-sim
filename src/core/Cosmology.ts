@@ -37,15 +37,36 @@ function aBase(tGyr: number): number {
 }
 
 // EDE pulse: brief boost of the homogeneous mode near z ~ Z_EQ.
-// Visually a "breath" in cosmic-web spacing and a rim glow strength.
-export function edePulse(tGyr: number): number {
-  // peak near t_eq, width ~ factor of 3 in log-t
+//
+// Paper's actual mechanism (paper §cosmology): the scalar S couples to
+// the trace χ = −T^μ_μ/c² of the matter stress-energy. In pure
+// radiation T^μ_μ = 0 so the homogeneous mode is DORMANT; it only
+// activates as the universe transitions from radiation- to
+// matter-dominated, near z ≈ 3000. The pulse below is a toy-level
+// realisation of that switch-on: rather than a static Gaussian, we
+// gate the amplitude by the radiation→matter trace switch and let
+// it decay as the matter component dilutes through the dark ages.
+//
+// Visually this still reads as a single bright burst near t_eq with
+// a slow Hubble-tension tail, but now the FORM is keyed on the
+// physical mechanism rather than picked by hand.
+export function traceChi(tGyr: number): number {
+  // Toy switch-on. χ ≈ 0 while radiation-dominated (t ≪ t_eq), saturates
+  // to ~1 as matter takes over, then dilutes ∝ a⁻³ ∝ t⁻². We capture
+  // both behaviours with a smooth ramp × power-law tail.
   if (tGyr <= 0) return 0;
-  const lt  = Math.log10(tGyr);
-  const lt0 = Math.log10(T_RAD_END);
-  const sig = 0.35;
-  const x   = (lt - lt0) / sig;
-  return Math.exp(-x * x);
+  const r = tGyr / T_RAD_END;
+  const switchOn = r / Math.sqrt(1 + r * r);          // ~0 at r≪1, ~1 at r≫1
+  const matterDilution = 1 / (1 + Math.pow(tGyr / 0.005, 1.4));   // tail decays
+  return switchOn * matterDilution;
+}
+
+export function edePulse(tGyr: number): number {
+  // The pulse amplitude tracks χ(t) directly: dormant in radiation,
+  // peaks around z_eq (~50 kyr), then fades through the dark ages.
+  // Same overall shape as the old Gaussian but derived from the
+  // trace-coupling mechanism.
+  return Math.max(0, Math.min(1, traceChi(tGyr) * 1.8));
 }
 
 export function a(tGyr: number): number {

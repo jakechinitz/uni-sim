@@ -1,11 +1,12 @@
 // Maps the single zoom slider (0..1) to (regime, intra-regime fraction).
 //
-// There are 6 regimes. Each spans the same slider width (1/6). The fade band
-// straddling each boundary is the last/first ±0.04 of an adjacent regime.
+// Six regimes drill from the cosmic web down to the substrate. Each spans
+// the same slider width (1/6). The fade band straddling each boundary
+// is the last/first ±0.04 of an adjacent regime.
 
-export type RegimeKey = 'COSMIC' | 'GALAXY' | 'SYSTEM' | 'SUBSTRATE';
+export type RegimeKey = 'COSMIC' | 'GALAXY' | 'SYSTEM' | 'PLANET' | 'ATOMIC' | 'SUBSTRATE';
 
-export const REGIMES: RegimeKey[] = ['COSMIC', 'GALAXY', 'SYSTEM', 'SUBSTRATE'];
+export const REGIMES: RegimeKey[] = ['COSMIC', 'GALAXY', 'SYSTEM', 'PLANET', 'ATOMIC', 'SUBSTRATE'];
 
 const N = REGIMES.length;
 const W = 1 / N;                // width of one regime band along slider

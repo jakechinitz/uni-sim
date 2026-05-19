@@ -2,7 +2,7 @@
 // RAR collapses to Newton at AU scale (g_bar >> a0), so orbits look correct.
 
 import * as THREE from 'three';
-import { Regime, RegimeContext, DragTarget } from './Regime';
+import { Regime, RegimeContext, DragTarget, FocusState } from './Regime';
 import { mulberry32 } from '../core/Rng';
 import { hashStr } from '../util/hash';
 import { radialGlow } from '../render/Glow';
@@ -23,6 +23,9 @@ interface PlanetView {
   trailPositions: Float32Array;
   trailHead: number;
   ring?: THREE.Mesh;
+  // Per-planet entanglement halo, parented to mesh so it follows the
+  // planet as it orbits (and when the user drags it).
+  entHalo: THREE.Sprite;
 }
 
 const TRAIL = 256;
@@ -191,7 +194,19 @@ export class SystemRegime extends Regime {
       const trail = new THREE.Line(tg, tm);
       this.scene.add(trail);
 
-      const pv: PlanetView = { body, mesh, trail, trailPositions, trailHead: 0 };
+      // Per-planet entanglement halo (additive sprite, child of mesh →
+      // tracks the planet automatically). Visible only when the
+      // entanglement toggle is on.
+      const entHalo = new THREE.Sprite(new THREE.SpriteMaterial({
+        map: radialGlow(256, 'rgba(0,0,0,0)', 'rgba(122,215,255,0.45)', 'rgba(122,215,255,0)'),
+        color: 0x7ad7ff,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false, transparent: true, opacity: 0
+      }));
+      entHalo.scale.setScalar(radius * 4.5);
+      mesh.add(entHalo);
+
+      const pv: PlanetView = { body, mesh, trail, trailPositions, trailHead: 0, entHalo };
 
       // Saturn-style ring for one planet
       if (i === 3) {
@@ -306,7 +321,8 @@ export class SystemRegime extends Regime {
       // BH remnant — slowly grows its accretion disk visually
       this.remnant.tick(this.time);
     }
-    for (const pv of this.planets) {
+    for (let i = 0; i < this.planets.length; i++) {
+      const pv = this.planets[i];
       const m = pv.mesh.material as THREE.MeshStandardMaterial;
       m.opacity = sysAlpha;
       if (pv.ring) {
@@ -315,6 +331,11 @@ export class SystemRegime extends Regime {
       }
       // Orbit trail also fades in
       (pv.trail.material as THREE.LineBasicMaterial).opacity = 0.55 * sysAlpha;
+      // Planet halo — only when entanglement toggle is on
+      const haloMat = pv.entHalo.material as THREE.SpriteMaterial;
+      haloMat.opacity = ctx.entanglementOn
+        ? 0.4 * sysAlpha * (0.85 + 0.15 * Math.sin(this.wallTime * 1.0 + i * 0.6))
+        : 0;
     }
     for (const pv of this.planets) {
       pv.mesh.position.set(pv.body.pos[0], pv.body.pos[1], pv.body.pos[2]);
@@ -404,6 +425,29 @@ export class SystemRegime extends Regime {
 
   bloomStrength(_ctx: RegimeContext): number {
     return 0.4;
+  }
+
+  // Publish the focused planet = the planet nearest the camera's
+  // forward ray. Index → "p-N" id, stable per seed. Committed when
+  // zoom crosses into PLANET.
+  publishFocus(): Partial<FocusState> | null {
+    const camPos = this.camera.position;
+    const fwd = new THREE.Vector3();
+    this.camera.getWorldDirection(fwd);
+    let bestId: string | null = null;
+    let bestPerp2 = Infinity;
+    for (const pv of this.planets) {
+      const dx = pv.body.pos[0] - camPos.x;
+      const dy = pv.body.pos[1] - camPos.y;
+      const dz = pv.body.pos[2] - camPos.z;
+      const along = dx * fwd.x + dy * fwd.y + dz * fwd.z;
+      if (along < 1) continue;             // behind / too close
+      const total2 = dx * dx + dy * dy + dz * dz;
+      const perp2  = total2 - along * along;
+      if (perp2 < bestPerp2) { bestPerp2 = perp2; bestId = pv.body.id; }
+    }
+    if (bestId === null) return null;
+    return { planetId: bestId };
   }
 
   lensSources(): { worldPos: THREE.Vector3; radius: number }[] {

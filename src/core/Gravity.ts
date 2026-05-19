@@ -25,12 +25,28 @@ export interface Body {
 // Soft 1/r with Plummer-style softening to avoid singularities at close range.
 const SOFT2 = 1e-8;
 
-// Simple-µ family RAR: ν(y) = 1/2 + sqrt(1/4 + 1/y), y = g_bar / a0.
-// g_obs = ν · g_bar.
-// In the deep-MOND limit y << 1: ν ≈ 1/sqrt(y), so g_obs ≈ sqrt(a0 * g_bar).
-// In the Newtonian limit y >> 1: ν → 1.
+// Paper's RAR (Chinitz, eq. immediately after a₀ definition):
+//   g_obs = g_bar / (1 − exp(−√(g_bar/a₀)))
+// Same asymptotes as the simple-µ family — Newton when g_bar ≫ a₀,
+// deep-MOND √(a₀·g_bar) when g_bar ≪ a₀ — but a slightly sharper
+// crossover. This is the single form the paper actually derives, so
+// the live sim now uses it; the older simple-µ is kept (nuRAR_simple)
+// for reference / comparison.
 export function nuRAR(y: number): number {
-  if (y <= 1e-30) return 1e15; // saturates; clamped by caller anyway
+  if (y <= 0) return 1e15;
+  const sy = Math.sqrt(y);
+  // Series-expand 1/(1 - exp(-sy)) for tiny sy to avoid 0/0:
+  //   1/(1 - exp(-x)) ≈ 1/x + 0.5 + x/12 - ...
+  // ν = g_obs/g_bar = (1/(1−exp(−sy))) / sy.  At sy → 0, ν → 1/(sy·sy) = 1/y.
+  if (sy < 1e-7) return 1 / Math.max(y, 1e-30);
+  const denom = 1 - Math.exp(-sy);
+  return 1 / (sy * denom);
+}
+
+// Older simple-µ family: ν(y) = 1/2 + √(1/4 + 1/y). Kept for diff /
+// comparison work; not wired in.
+export function nuRAR_simple(y: number): number {
+  if (y <= 1e-30) return 1e15;
   return 0.5 + Math.sqrt(0.25 + 1 / y);
 }
 

@@ -88,7 +88,11 @@ export class Composer {
     });
     this.composer.addPass(this.lens);
 
-    this.bloom = new UnrealBloomPass(new THREE.Vector2(w / 2, h / 2), 0.95, 0.85, 0.05);
+    // Bloom: gentler strength + higher threshold so only the truly
+    // bright pixels (stars, accretion disks, supernovae) bloom — the
+    // bulk of the galaxy disk no longer washes out. Per-regime
+    // bloomStrength() overrides this baseline as the camera flies in.
+    this.bloom = new UnrealBloomPass(new THREE.Vector2(w / 2, h / 2), 0.55, 0.70, 0.22);
     this.composer.addPass(this.bloom);
 
     // Flash pass for big bang / regime transitions
@@ -129,7 +133,7 @@ export class Composer {
     this.renderPass.camera = camera;
   }
 
-  setBloom(strength: number, radius = 0.85, threshold = 0.05) {
+  setBloom(strength: number, radius = 0.70, threshold = 0.22) {
     this.bloom.strength = strength;
     this.bloom.radius = radius;
     this.bloom.threshold = threshold;

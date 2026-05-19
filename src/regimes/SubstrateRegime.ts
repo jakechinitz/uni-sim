@@ -5,7 +5,7 @@ import * as THREE from 'three';
 import { Regime, RegimeContext, DragTarget, HoverInfo } from './Regime';
 import { mulberry32 } from '../core/Rng';
 import { hashStr } from '../util/hash';
-import { Defect } from '../core/Gravity';
+import { Defect, gradAccelQ } from '../core/Gravity';
 import { radialGlow } from '../render/Glow';
 import { TET_MICROSTATES, G_SHARE_EFF } from '../util/units';
 import { TelegrapherField } from '../render/Telegrapher';
@@ -50,7 +50,10 @@ export class SubstrateRegime extends Regime {
   // q-cloud: instanced point sprites at every cell, opacity = (1-q)
   private cloudMesh!: THREE.InstancedMesh;
   private cloudDummy = new THREE.Object3D();
-  private cloudColor = new THREE.Color();
+  // Per-defect ArrowHelper showing the analytic ∇q force vector at the
+  // defect's position. Surfaces the paper's substrate primitive a = -∇q·c²/2
+  // that the PDE engine implements numerically — same physics, two views.
+  private gradArrows: THREE.ArrowHelper[] = [];
 
   constructor(aspect: number, seed: number) {
     super(aspect);
@@ -161,6 +164,16 @@ export class SubstrateRegime extends Regime {
       this.scene.add(s);
       this.draggable.add(s);
       this.defectMeshes.push(s);
+
+      // Analytic gradient arrow — points along Gravity.gradAccelQ(x).
+      // Visible at any zoom; length scales with force magnitude.
+      const arrow = new THREE.ArrowHelper(
+        new THREE.Vector3(1, 0, 0), new THREE.Vector3(x, y, z),
+        0.001, 0x9ee0ff, 0.6, 0.35
+      );
+      arrow.visible = false;
+      this.scene.add(arrow);
+      this.gradArrows.push(arrow);
     }
   }
 
@@ -243,6 +256,26 @@ export class SubstrateRegime extends Regime {
         this.defectVels[i][1] = sd.vy;
         this.defectVels[i][2] = sd.vz;
       }
+    }
+
+    // Analytic substrate-force arrows. Surfaces the paper's primitive
+    // a = -∇q·c²/2 next to the PDE engine's numeric force — same physics,
+    // two complementary views. Visible only when the entanglement
+    // toggle is on so they don't clutter the default scene.
+    for (let i = 0; i < this.defects.length; i++) {
+      const d = this.defects[i];
+      const arrow = this.gradArrows[i];
+      if (!ctx.entanglementOn) { arrow.visible = false; continue; }
+      const [ax, ay, az] = gradAccelQ(d.pos[0], d.pos[1], d.pos[2], this.defects, 1);
+      const mag = Math.hypot(ax, ay, az);
+      if (mag < 1e-6) { arrow.visible = false; continue; }
+      arrow.visible = true;
+      arrow.position.set(d.pos[0], d.pos[1], d.pos[2]);
+      arrow.setDirection(new THREE.Vector3(ax / mag, ay / mag, az / mag));
+      // Length in [0.3, 3.0] scene units — proportional to log(|∇q|) so
+      // strong gradients don't punch off-screen.
+      const len = Math.min(3.0, 0.3 + 0.8 * Math.log10(1 + mag * 5));
+      arrow.setLength(len, len * 0.25, len * 0.18);
     }
 
     // Defect glow: Hawking-style heat as local q approaches 0
