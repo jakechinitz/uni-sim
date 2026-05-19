@@ -47,6 +47,10 @@ export class CosmicRegime extends Regime {
   private _nbodyTick = 0;
   private wallTime = 0;
   private manyPasts = new ManyPasts(new THREE.Color(0x9b8dff), 3.5);
+  // Inflation flash: tracks seconds since the last "Big Bang event" so
+  // the radiation-noise quad visibly inflates from a point.
+  private wallSinceBang = 999;
+  private prevCosmicT = 1;
 
   constructor(aspect: number, seed: number) {
     super(aspect);
@@ -64,13 +68,23 @@ export class CosmicRegime extends Regime {
       depthTest: false,
       depthWrite: false,
       transparent: true,
-      uniforms: { intensity: { value: 1 }, time: { value: 0 }, tint: { value: new THREE.Color('#ff8848') } },
+      uniforms: {
+        intensity:  { value: 1 },
+        time:       { value: 0 },
+        tint:       { value: new THREE.Color('#ff8848') },
+        // Inflation factor — when > 1 the noise is "zoomed in" around center
+        // so only a tiny dot is visible. Decays to 1 over ~1 wall-second
+        // after the Big Bang, giving the universe a visible inflationary
+        // expansion at t = 0.
+        inflate:    { value: 1.0 }
+      },
       vertexShader:  /* glsl */`varying vec2 vUv; void main(){ vUv=uv; gl_Position=vec4(position,1.0); }`,
       fragmentShader: /* glsl */`
         varying vec2 vUv;
         uniform float intensity;
         uniform float time;
         uniform vec3 tint;
+        uniform float inflate;
         float hash(vec2 p){ p=fract(p*vec2(123.34,456.21)); p+=dot(p,p+34.345); return fract(p.x*p.y); }
         float noise(vec2 p){
           vec2 i=floor(p), f=fract(p);
@@ -82,11 +96,19 @@ export class CosmicRegime extends Regime {
         float fbm(vec2 p){ float v=0.,a=0.5; for(int i=0;i<4;i++){ v+=a*noise(p); p*=2.0+0.13; a*=0.5; } return v; }
         void main(){
           if (intensity <= 0.005) discard;
-          vec2 p = vUv * 5.0 + vec2(time*0.08, -time*0.06);
+          // Inflation: as inflate increases the UV is contracted toward
+          // (0.5, 0.5), so the visible noise pattern shrinks to a tiny
+          // central dot and rapidly expands as inflate decays to 1.
+          vec2 cuv = (vUv - 0.5) * inflate + 0.5;
+          vec2 p = cuv * 5.0 + vec2(time*0.08, -time*0.06);
           float n = fbm(p) * 0.7 + 0.3 * fbm(p*3.1 + 7.0);
           float r = length(vUv - 0.5);
-          float vignette = 1.0 - smoothstep(0.4, 0.9, r);
-          vec3 col = tint * (0.55 + 0.7 * n) * vignette;
+          // Tighter vignette when inflating so the dot is a sharp bright point
+          float vignAttn = mix(1.0, 6.0, smoothstep(1.0, 30.0, inflate));
+          float vignette = 1.0 - smoothstep(0.4 / vignAttn, 0.9 / vignAttn, r);
+          // Boost brightness during inflation
+          float boost = mix(1.0, 4.0, smoothstep(1.0, 30.0, inflate));
+          vec3 col = tint * (0.55 + 0.7 * n) * vignette * boost;
           gl_FragColor = vec4(col, intensity * (0.65 + 0.5 * n));
         }
       `
@@ -211,12 +233,21 @@ export class CosmicRegime extends Regime {
     // Big bang flash and radiation-era visibility
     const t = ctx.time;
     const tinyT = 5e-5;             // ~50 kyr in Gyr
-    const recomb = 3.8e-4;
+    const recomb = 3.8e-4;          // ~380 kyr
+    // Inflation flash: when cosmic time has just been reset/scrubbed to ~0,
+    // reset the wall-time inflation counter. The noise quad then inflates
+    // from a central dot over ~1 wall-second.
+    if (this.prevCosmicT > 1e-3 && t < 1e-6) this.wallSinceBang = 0;
+    this.prevCosmicT = t;
+    this.wallSinceBang += ctx.dtWall;
+    // Sharper "fog-clears" recombination drop: stays bright through the
+    // plasma era, then steeply falls within ±10 % of t_recomb as the
+    // universe goes transparent.
     const radIntensity =
-      t < 1e-9          ? 1.0 :
-      t < tinyT         ? 1.0 - 0.4 * smoothstep(0, tinyT, t) :
-      t < recomb        ? 0.6 - 0.5 * smoothstep(tinyT, recomb, t) :
-                          Math.max(0, 0.1 - 0.1 * smoothstep(recomb, 0.01, t));
+      t < 1e-9              ? 1.0 :
+      t < recomb * 0.9      ? 1.0 - 0.5 * smoothstep(0, recomb * 0.9, t) :
+      t < recomb * 1.1      ? 0.5 * (1 - smoothstep(recomb * 0.9, recomb * 1.1, t)) :
+                              Math.max(0, 0.03 * (1 - smoothstep(recomb * 1.1, 0.01, t)));
     const radMat = this.radNoiseMesh.material as THREE.ShaderMaterial;
     radMat.uniforms.intensity.value = radIntensity * (1 + 0.6 * ctx.edePulse);
     // Radiation noise is pure visual ambiance — wall time, never freezes
@@ -224,6 +255,8 @@ export class CosmicRegime extends Regime {
     radMat.uniforms.tint.value.setRGB(
       1.0, 0.55 + 0.15 * ctx.edePulse, 0.30 + 0.20 * ctx.edePulse
     );
+    // Inflation factor: starts huge after Big Bang, decays to 1 over ~1 sec
+    radMat.uniforms.inflate.value = 1 + 60 * Math.exp(-this.wallSinceBang * 3.5);
 
     // "Breath" — visible expansion from EDE pulse
     // Hubble flow: galaxy positions scale with a(t). At t≈1 Gyr the universe
