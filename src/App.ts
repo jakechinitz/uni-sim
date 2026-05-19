@@ -36,9 +36,10 @@ export class App {
     this.state = saved ?? emptySave((Math.random() * 1e9) | 0);
 
     // Mirror state into clock
-    this.clock.scrub    = this.state.scrub;
-    this.clock.speedExp = this.state.speedExp;
-    this.clock.playing  = true;
+    this.clock.scrub     = this.state.scrub;
+    this.clock.speedExp  = this.state.speedExp;
+    this.clock.direction = this.state.direction;
+    this.clock.playing   = this.state.playing;
 
     // Dummy scene/camera for composer init
     const dummyScene = new THREE.Scene();
@@ -64,16 +65,20 @@ export class App {
     bindUI({
       state: this.state,
       onChange: () => {
-        this.clock.scrub    = this.state.scrub;
-        this.clock.speedExp = this.state.speedExp;
+        this.clock.scrub     = this.state.scrub;
+        this.clock.speedExp  = this.state.speedExp;
+        this.clock.direction = this.state.direction;
+        this.clock.playing   = this.state.playing;
         this.regimes.setZoom(this.state.zoom);
         this.composer.enableBloom(this.state.toggles.bloom);
         autosave(this.state);
       },
       onLoad: (data) => {
         this.state = data;
-        this.clock.scrub    = data.scrub;
-        this.clock.speedExp = data.speedExp;
+        this.clock.scrub     = data.scrub;
+        this.clock.speedExp  = data.speedExp;
+        this.clock.direction = data.direction;
+        this.clock.playing   = data.playing;
         this.regimes.setSeed(data.seed);          // also resets focus
         this.regimes.setZoom(data.zoom);
         this.composer.enableBloom(data.toggles.bloom);
@@ -113,7 +118,9 @@ export class App {
     const { dtWall, dtSim } = this.clock.tick();
 
     // sync state from clock
-    this.state.scrub = this.clock.scrub;
+    this.state.scrub     = this.clock.scrub;
+    this.state.direction = this.clock.direction;
+    this.state.playing   = this.clock.playing;
 
     const tGyr = this.clock.time;
     // Big-bang flash whenever we arrive at t≈0 from elsewhere
@@ -146,9 +153,11 @@ export class App {
     // HUD
     const zR = cosmoZ(tGyr);
     const ep = cosmoEpoch(tGyr);
-    const tLabel = tGyr < 1e-3 ? `t = ${(tGyr * 1e6).toFixed(2)} kyr`
-                  : tGyr < 1  ? `t = ${(tGyr * 1000).toFixed(0)} Myr`
-                               : `t = ${tGyr.toFixed(2)} Gyr`;
+    const tLabel = tGyr < 1e-3   ? `t = ${(tGyr * 1e6).toFixed(2)} kyr`
+                  : tGyr < 1     ? `t = ${(tGyr * 1000).toFixed(0)} Myr`
+                  : tGyr < 13.8  ? `t = ${tGyr.toFixed(2)} Gyr`
+                  : tGyr < 100   ? `t = ${tGyr.toFixed(2)} Gyr · future`
+                                 : `t = ${tGyr.toExponential(2)} Gyr · far future`;
     const zLabel = isFinite(zR) ? (zR > 1000 ? `z ≈ ${zR.toExponential(2)}` : `z ≈ ${zR.toFixed(2)}`) : 'z ≈ ∞';
     setHud({
       time:  `${tLabel} · ${zLabel} · ${ep.label}`,

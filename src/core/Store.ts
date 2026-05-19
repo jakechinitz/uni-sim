@@ -3,16 +3,19 @@
 import type { RegimeKey } from './Camera';
 import { SPEED_EXP_DEFAULT } from '../util/units';
 
-// v2: speedExp range expanded from ±3 to ±18 (sim_sec / wall_sec, log10).
-const LS_KEY = 'unisim:v2';
+// v3: speedExp is pure log-magnitude (forward); direction + playing
+// promoted to first-class fields so slow-mo doesn't masquerade as rewind.
+const LS_KEY = 'unisim:v3';
 
 export interface SaveData {
-  version: 2;
+  version: 3;
   seed: number;
   scrub: number;
   zoom: number;
   regime: RegimeKey;
-  speedExp: number;
+  speedExp: number;       // log10 of forward sim_sec/wall_sec
+  direction: 1 | -1;      // +1 forward, -1 rewind (separate from speedExp)
+  playing: boolean;       // play/pause state (separate from speed/direction)
   toggles: { entangle: boolean; bloom: boolean };
   overrides: Record<string, [number, number, number, number, number, number]>;
 }
@@ -61,12 +64,14 @@ export function readFile(f: File): Promise<SaveData> {
 
 export function emptySave(seed: number): SaveData {
   return {
-    version: 2,
+    version: 3,
     seed,
     scrub: 0,
     zoom: 0.07,
     regime: 'COSMIC',
     speedExp: SPEED_EXP_DEFAULT,
+    direction: 1,
+    playing: true,
     toggles: { entangle: false, bloom: true },
     overrides: {}
   };

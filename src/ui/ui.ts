@@ -2,7 +2,6 @@
 
 import type { SaveData } from '../core/Store';
 import { downloadSave, readFile } from '../core/Store';
-import { SPEED_DEAD_ZONE, SPEED_EXP_DEFAULT } from '../util/units';
 
 export interface UICallbacks {
   state: SaveData;
@@ -35,7 +34,14 @@ export function bindUI(cb: UICallbacks) {
   sliderSpeed.value = String(cb.state.speedExp);
   togEnt.checked    = cb.state.toggles.entangle;
   togBlm.checked    = cb.state.toggles.bloom;
-  btnPlay.textContent = cb.state.speedExp === 0 ? '▶' : '⏸';
+  paintTransport();
+
+  function paintTransport() {
+    btnPlay.textContent = cb.state.playing ? '⏸' : '▶';
+    btnRew.classList.toggle('on', cb.state.direction === -1 && cb.state.playing);
+    btnFwd.classList.toggle('on', cb.state.direction ===  1 && cb.state.playing);
+    refreshPresetState(cb.state.speedExp);
+  }
 
   sliderTime.addEventListener('input', () => {
     cb.state.scrub = parseFloat(sliderTime.value);
@@ -45,44 +51,29 @@ export function bindUI(cb: UICallbacks) {
     cb.state.zoom = parseFloat(sliderZoom.value);
     cb.onChange();
   });
-  // Remember last non-zero speed so play resumes there
-  let lastSpeedExp = cb.state.speedExp !== 0 ? cb.state.speedExp : SPEED_EXP_DEFAULT;
-
   sliderSpeed.addEventListener('input', () => {
     cb.state.speedExp = parseFloat(sliderSpeed.value);
-    if (Math.abs(cb.state.speedExp) >= SPEED_DEAD_ZONE) lastSpeedExp = cb.state.speedExp;
-    refreshPresetState(cb.state.speedExp);
+    // Adjusting the speed slider implies "I want to play at this speed";
+    // unpause if paused so the new speed is visible.
+    if (!cb.state.playing) cb.state.playing = true;
+    paintTransport();
     cb.onChange();
   });
   btnPlay.addEventListener('click', () => {
-    if (Math.abs(cb.state.speedExp) < SPEED_DEAD_ZONE) {
-      cb.state.speedExp = lastSpeedExp;
-      btnPlay.textContent = '⏸';
-    } else {
-      lastSpeedExp = cb.state.speedExp;
-      cb.state.speedExp = 0;
-      btnPlay.textContent = '▶';
-    }
-    sliderSpeed.value = String(cb.state.speedExp);
-    refreshPresetState(cb.state.speedExp);
+    cb.state.playing = !cb.state.playing;
+    paintTransport();
     cb.onChange();
   });
   btnRew.addEventListener('click', () => {
-    const e = Math.max(1, Math.abs(cb.state.speedExp || lastSpeedExp));
-    cb.state.speedExp = -e;
-    lastSpeedExp = cb.state.speedExp;
-    sliderSpeed.value = String(cb.state.speedExp);
-    btnPlay.textContent = '⏸';
-    refreshPresetState(cb.state.speedExp);
+    cb.state.direction = -1;
+    cb.state.playing = true;
+    paintTransport();
     cb.onChange();
   });
   btnFwd.addEventListener('click', () => {
-    const e = Math.max(1, Math.abs(cb.state.speedExp || lastSpeedExp));
-    cb.state.speedExp = e;
-    lastSpeedExp = cb.state.speedExp;
-    sliderSpeed.value = String(cb.state.speedExp);
-    btnPlay.textContent = '⏸';
-    refreshPresetState(cb.state.speedExp);
+    cb.state.direction = 1;
+    cb.state.playing = true;
+    paintTransport();
     cb.onChange();
   });
 
@@ -98,14 +89,13 @@ export function bindUI(cb: UICallbacks) {
     ch.addEventListener('click', () => {
       const v = parseFloat(ch.dataset.exp ?? '');
       cb.state.speedExp = v;
-      lastSpeedExp = v;
+      cb.state.playing = true;
       sliderSpeed.value = String(v);
-      btnPlay.textContent = '⏸';
-      refreshPresetState(v);
+      paintTransport();
       cb.onChange();
     });
   });
-  refreshPresetState(cb.state.speedExp);
+
   btnSave.addEventListener('click', () => downloadSave(cb.state));
   btnLoad.addEventListener('click', () => inpLoad.click());
   inpLoad.addEventListener('change', async () => {
@@ -127,14 +117,6 @@ export function bindUI(cb: UICallbacks) {
   });
 }
 
-// Exported so syncControls() can re-highlight chips after a load.
-function highlightPresets(exp: number) {
-  document.querySelectorAll<HTMLButtonElement>('#speed-presets .chip').forEach(ch => {
-    const v = parseFloat(ch.dataset.exp ?? '');
-    ch.classList.toggle('on', Math.abs(v - exp) < 0.05);
-  });
-}
-
 export function setHud(parts: { time: string; zoom: string; speed: string; epoch: string }) {
   (el<HTMLSpanElement>('hud-time')).textContent  = parts.time;
   (el<HTMLSpanElement>('hud-zoom')).textContent  = parts.zoom;
@@ -148,7 +130,11 @@ export function syncControls(state: SaveData) {
   (el<HTMLInputElement>('slider-speed')).value = String(state.speedExp);
   (el<HTMLInputElement>('toggle-entangle')).checked = state.toggles.entangle;
   (el<HTMLInputElement>('toggle-bloom')).checked    = state.toggles.bloom;
-  (el<HTMLButtonElement>('btn-play')).textContent =
-    Math.abs(state.speedExp) < SPEED_DEAD_ZONE ? '▶' : '⏸';
-  highlightPresets(state.speedExp);
+  (el<HTMLButtonElement>('btn-play')).textContent = state.playing ? '⏸' : '▶';
+  (el<HTMLButtonElement>('btn-rewind')).classList.toggle('on',  state.direction === -1 && state.playing);
+  (el<HTMLButtonElement>('btn-forward')).classList.toggle('on', state.direction ===  1 && state.playing);
+  document.querySelectorAll<HTMLButtonElement>('#speed-presets .chip').forEach(ch => {
+    const v = parseFloat(ch.dataset.exp ?? '');
+    ch.classList.toggle('on', Math.abs(v - state.speedExp) < 0.05);
+  });
 }
