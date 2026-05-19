@@ -134,9 +134,26 @@ export class GalaxyRegime extends Regime {
       mesh.userData = { type: 'bh', index: this.bhs.length };
       this.scene.add(mesh);
       this.draggable.add(mesh);
+      // Initial tangential velocity ≈ Keplerian circular speed around the
+      // central SMBH so the stellar BH starts on roughly-stable orbit.
+      // If there's no central, just sit and feel each other's gravity.
+      let vx = 0, vy = 0, vz = 0;
+      const cMass = this.centralMass();
+      if (cMass > 0) {
+        const vc = this.circularSpeed(r);
+        const sgn = rng() < 0.5 ? -1 : 1;    // mix orbit directions for variety
+        vx = -sgn * Math.sin(ang) * vc;
+        vz =  sgn * Math.cos(ang) * vc;
+      }
       this.bhs.push({
         mesh,
-        body: { id: `bh-stellar-${i}`, pos: [x, y, z], vel: [0, 0, 0], mass: simMass, fixed: true },
+        body: {
+          id: `bh-stellar-${i}`,
+          pos: [x, y, z],
+          vel: [vx, vy, vz],
+          mass: simMass,
+          fixed: false             // stellar BHs are now dynamic
+        },
         mass: simMass,
         realMassSolar: massSolar,
         isCentral: false,
@@ -340,6 +357,57 @@ export class GalaxyRegime extends Regime {
 
   // Total mass at galactic centre — drives initial circular speeds for star
   // placement. Stellar-mass BHs are negligible vs. the SMBH at this scale.
+  // Coalesce close BH pairs. Sim Schwarzschild radius scales as mass;
+  // when two BHs are within (rs1 + rs2) × buffer, the smaller is absorbed
+  // by the heavier and a telegrapher front rings out from the merger.
+  private mergeBHs() {
+    const RS_SCALE = 0.0035;   // sim units per unit mass (visual choice)
+    const BUFFER   = 4.0;      // merger triggers at a generous multiple
+    let merged = false;
+    outer:
+    for (let i = 0; i < this.bhs.length; i++) {
+      for (let j = i + 1; j < this.bhs.length; j++) {
+        const a = this.bhs[i], b = this.bhs[j];
+        const dx = a.body.pos[0] - b.body.pos[0];
+        const dy = a.body.pos[1] - b.body.pos[1];
+        const dz = a.body.pos[2] - b.body.pos[2];
+        const d2 = dx * dx + dy * dy + dz * dz;
+        const rs = (RS_SCALE * (a.mass + b.mass)) * BUFFER;
+        if (d2 < rs * rs) {
+          // Heavier survives; lighter gets absorbed. Momentum conserved.
+          const keep = a.mass >= b.mass ? a : b;
+          const gone = a.mass >= b.mass ? b : a;
+          const M = keep.mass + gone.mass;
+          for (let k = 0; k < 3; k++) {
+            keep.body.pos[k] = (keep.mass * keep.body.pos[k] + gone.mass * gone.body.pos[k]) / M;
+            keep.body.vel[k] = (keep.mass * keep.body.vel[k] + gone.mass * gone.body.vel[k]) / M;
+          }
+          keep.mass = M;
+          keep.body.mass = M;
+          keep.realMassSolar += gone.realMassSolar;
+          keep.mesh.position.set(keep.body.pos[0], keep.body.pos[1], keep.body.pos[2]);
+          // Merger ringdown — telegrapher front propagating at substrate-c
+          this.telegrapher.emit(keep.mesh.position.clone(), R_GAL * 1.6, 1.4);
+          // Remove the absorbed BH from scene + draggable + bhs[]
+          this.scene.remove(gone.mesh);
+          this.draggable.remove(gone.mesh);
+          gone.mesh.traverse(o => {
+            const g = (o as any).geometry; if (g?.dispose) g.dispose();
+            const m = (o as any).material;
+            if (Array.isArray(m)) m.forEach((x: any) => x.dispose?.());
+            else m?.dispose?.();
+          });
+          this.bhs.splice(this.bhs.indexOf(gone), 1);
+          // Re-index userData so pick/hover still works
+          for (let k = 0; k < this.bhs.length; k++) this.bhs[k].mesh.userData.index = k;
+          merged = true;
+          break outer;
+        }
+      }
+    }
+    return merged;
+  }
+
   private centralMass(): number {
     const central = this.bhs.find(b => b.isCentral);
     return central?.mass ?? 0;
@@ -370,10 +438,55 @@ export class GalaxyRegime extends Regime {
     this.spiralMesh.visible = ctx.diskOn;
     for (const b of this.bhs) b.mesh.tick(this.time);
 
-    // Integrate stars under combined BH gravity using RAR. Each star feels
-    // every BH in the galaxy (central SMBH + stellar-mass remnants).
+    // BH-BH gravity (stellar BHs orbit the central SMBH and feel each
+    // other). Simple leapfrog at the same dt as stars; N ≤ 7 so the
+    // O(N²) inner loop is free. After each substep, check for mergers:
+    // if two BHs come within combined Schwarzschild radius, they coalesce
+    // into one body conserving mass + linear momentum, emit a wavefront.
     const sub = 2;
     const dtSim = visDt / sub;
+    for (let s = 0; s < sub; s++) {
+      // Compute accelerations on each non-fixed BH from all others
+      const bN = this.bhs.length;
+      const ax = new Float32Array(bN);
+      const ay = new Float32Array(bN);
+      const az = new Float32Array(bN);
+      for (let i = 0; i < bN; i++) {
+        if (this.bhs[i].body.fixed) continue;
+        let aix = 0, aiy = 0, aiz = 0;
+        const bi = this.bhs[i].body;
+        for (let j = 0; j < bN; j++) {
+          if (i === j) continue;
+          const bj = this.bhs[j].body;
+          const rx = bj.pos[0] - bi.pos[0];
+          const ry = bj.pos[1] - bi.pos[1];
+          const rz = bj.pos[2] - bi.pos[2];
+          const r2 = rx * rx + ry * ry + rz * rz + 0.04;
+          const inv_r = 1 / Math.sqrt(r2);
+          const g = G_SIM * bj.mass * inv_r * inv_r;     // strong-field; no MOND between BHs
+          aix += g * rx * inv_r;
+          aiy += g * ry * inv_r;
+          aiz += g * rz * inv_r;
+        }
+        ax[i] = aix; ay[i] = aiy; az[i] = aiz;
+      }
+      for (let i = 0; i < bN; i++) {
+        const b = this.bhs[i].body;
+        if (b.fixed) continue;
+        b.vel[0] += dtSim * ax[i];
+        b.vel[1] += dtSim * ay[i];
+        b.vel[2] += dtSim * az[i];
+        b.pos[0] += dtSim * b.vel[0];
+        b.pos[1] += dtSim * b.vel[1];
+        b.pos[2] += dtSim * b.vel[2];
+      }
+      // Merger pass — if two BHs are within rMerge (proportional to combined
+      // mass), absorb the lighter into the heavier. Momentum-conserving.
+      this.mergeBHs();
+    }
+
+    // Stars under combined BH gravity (RAR — paper §14). Each star feels
+    // every surviving BH (central SMBH + stellar remnants).
     for (let s = 0; s < sub; s++) {
       for (const star of this.stars) {
         if (star.body.fixed) continue;
@@ -500,10 +613,17 @@ export class GalaxyRegime extends Regime {
       worldPos: new THREE.Vector3().copy(bh.mesh.position),
       onDragMove: (p) => {
         bh.body.pos[0] = p.x; bh.body.pos[1] = p.y; bh.body.pos[2] = p.z;
+        // Pin to current position while held — leapfrog acceleration would
+        // otherwise blast the BH around as the user moves it
+        bh.body.fixed = true;
       },
-      onDragEnd: (_v) => {
-        bh.body.vel[0] = bh.body.vel[1] = bh.body.vel[2] = 0;
-        this.telegrapher.emit(bh.mesh.position.clone(), R_GAL * 2.2, 1.0);
+      onDragEnd: (v) => {
+        // Release with the (damped + capped) drag velocity. Central BH
+        // stays gravitationally dominant; stellar BHs go ballistic and
+        // get re-captured by the central if close.
+        bh.body.fixed = bh.isCentral;   // central stays anchored, stellars are free
+        bh.body.vel[0] = v.x; bh.body.vel[1] = v.y; bh.body.vel[2] = v.z;
+        this.telegrapher.emit(bh.mesh.position.clone(), R_GAL * 1.6, 0.8);
       }
     };
   }

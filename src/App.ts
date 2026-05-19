@@ -34,6 +34,12 @@ export class App {
     });
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     this.renderer.setClearColor(0x000000, 1);
+    // HDR tone mapping. Without this, the bright PointLight in SystemRegime
+    // clips planet surface colors to white near the star and pitch-black
+    // far away. ACESFilmic compresses the high end so we can crank the
+    // light intensity without losing detail.
+    this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    this.renderer.toneMappingExposure = 1.05;
     this.resize();
 
     // Pristine state, then overlay any save

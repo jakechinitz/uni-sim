@@ -145,13 +145,11 @@ export class SystemRegime extends Regime {
         new THREE.SphereGeometry(radius, 48, 32),
         new THREE.MeshStandardMaterial({
           color: planetCol,
-          // Matte + zero self-glow so the planet's day/night terminator
-          // from the star's PointLight reads cleanly. No emissive means
-          // the night side stays dark, which is what the user wanted
-          // to see.
-          roughness: 0.85,
+          roughness: 0.55,    // some specular sheen so the planet reads as solid
           metalness: 0.0,
-          emissive: 0x000000
+          // Tiny self-glow so silhouettes stay readable on the night side
+          // without erasing the terminator
+          emissive: planetCol.clone().multiplyScalar(0.06)
         })
       );
       mesh.userData = { type: 'planet', index: i };
@@ -194,14 +192,14 @@ export class SystemRegime extends Regime {
       this.planets.push(pv);
     }
 
-    // Lighting — bright point at the star, very low ambient so each planet
-    // has a clean day/night terminator. The star's PointLight follows
-    // starBody position; .decay = 1.0 gives a gentler falloff so distant
-    // planets still register a lit side.
-    this.starLight = new THREE.PointLight(0xfff2c8, 9, 4000, 1.0);
+    // Lighting — bright point at the star plus modest ambient so the
+    // dark side of each planet stays visible (not pitch-black). The
+    // ACES tone mapper in App.ts compresses the bright end so cranking
+    // intensity doesn't blow out the lit hemisphere.
+    this.starLight = new THREE.PointLight(0xfff2c8, 30, 4000, 0.9);
     this.starLight.position.set(0, 0, 0);
     this.scene.add(this.starLight);
-    this.scene.add(new THREE.AmbientLight(0x06080d, 0.18));
+    this.scene.add(new THREE.AmbientLight(0x1a1d24, 0.55));
 
     // Entanglement field — dipolar field lines
     const lineCount = 24;
