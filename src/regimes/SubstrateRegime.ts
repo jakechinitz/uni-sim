@@ -41,7 +41,9 @@ export class SubstrateRegime extends Regime {
 
   // Real substrate engine — telegrapher PDE + discrete defects on a 20³ grid.
   // The lattice IS the substrate; tetrahedra are visual scaffolding.
-  private sim = new SubstrateSim(20);
+  // 16³ = 4,096 cells. Previous 20³ = 8,000 doubled the per-frame PDE
+  // cost; 16³ keeps the q-cloud legible and the engine snappy.
+  private sim = new SubstrateSim(16);
   private simDefects: SimDefect[] = [];
   // engine-cell → scene coords. Engine origin is at (N/2, N/2, N/2).
   private cellSize = 0;            // set after sim construction
@@ -328,10 +330,8 @@ export class SubstrateRegime extends Regime {
     (this.edgeGeom.attributes.position as THREE.BufferAttribute).needsUpdate = true;
     (this.edgeGeom.attributes.color    as THREE.BufferAttribute).needsUpdate = true;
 
-    // Slow camera orbit
-    const phi = this.time * 0.04;
-    this.camera.position.set(Math.sin(phi) * LATTICE_R * 1.4, 4, Math.cos(phi) * LATTICE_R * 1.4);
-    this.camera.lookAt(0, 0, 0);
+    // Camera owned by OrbitControls.
+
 
     this.telegrapher.update(dtClamp);
   }

@@ -1,6 +1,7 @@
 // Top-level orchestrator: renderer, composer, regime manager, time clock, UI, drag, save.
 
 import * as THREE from 'three';
+import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { Composer } from './render/Composer';
 import { RegimeManager } from './regimes/RegimeManager';
 import { Clock } from './core/Clock';
@@ -20,9 +21,13 @@ export class App {
   private clock = new Clock();
   private state: SaveData;
   private prevTime = 1; // ensure first frame with time≈0 fires the bang flash
+  private controls!: OrbitControls;
+  private drag!: DragController;
+  private canvas!: HTMLCanvasElement;
 
   constructor() {
     const canvas = document.getElementById('c') as HTMLCanvasElement;
+    this.canvas = canvas;
     this.renderer = new THREE.WebGLRenderer({
       canvas, antialias: false, alpha: false,
       powerPreference: 'high-performance'
@@ -48,9 +53,12 @@ export class App {
     this.composer.enableBloom(this.state.toggles.bloom);
 
     this.regimes = new RegimeManager(this.renderer, this.composer, this.state.seed);
-    this.regimes.setZoom(this.state.zoom);
 
-    const drag = new DragController(
+    // DragController is registered FIRST so its pointerdown handler runs
+    // before OrbitControls' — when it grabs an object it stopImmediatePropagation
+    // and OrbitControls never sees the event. Free-space drags fall through
+    // to OrbitControls naturally.
+    this.drag = new DragController(
       canvas,
       () => this.regimes.current.scene,
       () => this.regimes.current.camera,
@@ -58,7 +66,14 @@ export class App {
       (i) => this.regimes.pick(i),
       (i) => this.regimes.hoverInfo(i)
     );
-    drag.onHover = (info, x, y) => updateHoverCard(info, x, y);
+    this.drag.onHover = (info, x, y) => updateHoverCard(info, x, y);
+
+    // Install OrbitControls on the initial regime and re-install on every
+    // regime swap so the controls track whichever camera is active.
+    this.installControls();
+    this.regimes.onRegimeChange = () => this.installControls();
+
+    this.regimes.setZoom(this.state.zoom);
 
     bindClosurePanel();
 
@@ -113,6 +128,32 @@ export class App {
     if (this.regimes)  this.regimes.resize(w, h);
   }
 
+  // OrbitControls swap when regime changes. Damped orbit, dolly with wheel,
+  // right-click pan. Each regime has its own scale so distance limits adapt.
+  private installControls() {
+    if (this.controls) this.controls.dispose();
+    this.controls = new OrbitControls(this.regimes.current.camera, this.canvas);
+    this.controls.enableDamping = true;
+    this.controls.dampingFactor = 0.08;
+    this.controls.enablePan = true;
+    this.controls.screenSpacePanning = true;
+    this.controls.rotateSpeed = 0.5;
+    this.controls.zoomSpeed = 1.1;
+    this.controls.panSpeed = 0.8;
+    this.controls.target.set(0, 0, 0);
+    // Per-regime dolly range so wheel-zoom feels right at each scale
+    const limits: Record<string, { min: number; max: number }> = {
+      COSMIC:    { min: 8,  max: 220 },
+      GALAXY:    { min: 1,  max: 90  },
+      SYSTEM:    { min: 10, max: 700 },
+      SUBSTRATE: { min: 4,  max: 60  },
+    };
+    const lim = limits[this.regimes.currentKey] ?? { min: 1, max: 1000 };
+    this.controls.minDistance = lim.min;
+    this.controls.maxDistance = lim.max;
+    if (this.drag) this.drag.attachControls(this.controls);
+  }
+
   private loop = () => {
     requestAnimationFrame(this.loop);
     const { dtWall, dtSim } = this.clock.tick();
@@ -148,6 +189,7 @@ export class App {
       focus: this.regimes.focus
     }, dtSim);
 
+    if (this.controls) this.controls.update();
     this.regimes.render(dtWall);
 
     // HUD
@@ -166,7 +208,14 @@ export class App {
       epoch: ep.label
     });
 
-    // Autosave on time change
-    autosave(this.state);
+    // Autosave only every ~1.5 sec wall time, not every frame. The
+    // throttle inside autosave() collapsed bursts but still fired the
+    // tiny setTimeout dance 60×/sec — cumulative GC noise.
+    this._autosaveAccum += dtWall;
+    if (this._autosaveAccum >= 1.5) {
+      this._autosaveAccum = 0;
+      autosave(this.state);
+    }
   };
+  private _autosaveAccum = 0;
 }

@@ -6,6 +6,9 @@
 import * as THREE from 'three';
 import type { DragTarget, HoverInfo } from '../regimes/Regime';
 
+// Loose type for OrbitControls so we don't import three/addons here.
+interface CameraControls { enabled: boolean; }
+
 export class DragController {
   private raycaster = new THREE.Raycaster();
   private pointerNdc = new THREE.Vector2();
@@ -16,7 +19,11 @@ export class DragController {
   private lastWorld = new THREE.Vector3();
   private velocity = new THREE.Vector3();
   private velSamples: { p: THREE.Vector3; t: number }[] = [];
+  private controls: CameraControls | null = null;
   onHover: (info: HoverInfo | null, clientX: number, clientY: number) => void = () => {};
+
+  // Called by App when the active OrbitControls instance changes (regime swap)
+  attachControls(c: CameraControls | null) { this.controls = c; }
 
   constructor(
     canvas: HTMLCanvasElement,
@@ -61,6 +68,9 @@ export class DragController {
     const target = this.regimePick(hits[0]);
     if (!target) return;
     ev.preventDefault();
+    // Stop OrbitControls from also handling this pointerdown
+    ev.stopImmediatePropagation();
+    if (this.controls) this.controls.enabled = false;
     this.active = target;
     // Build a plane through the picked object's world position, facing the camera
     const camDir = new THREE.Vector3();
@@ -115,5 +125,6 @@ export class DragController {
     this.active = null;
     this.cursor.classList.remove('dragging');
     this.canvas.classList.remove('grabbing');
+    if (this.controls) this.controls.enabled = true;
   };
 }

@@ -46,6 +46,9 @@ export class RegimeManager {
   current!: Regime;
   currentKey: RegimeKey = 'COSMIC';
   focus: FocusState = { galaxyId: null, starId: null };
+  // App attaches this to swap OrbitControls onto the new camera whenever
+  // the active regime changes.
+  onRegimeChange?: (regime: Regime, key: RegimeKey) => void;
   private currentFocusCtx = '';
   // LRU cache: cacheKey → {regime, lastUsed}. Recreating GalaxyRegime is
   // expensive (BH shaders, 6k star buffer, spiral mesh), so we cache rather
@@ -164,5 +167,6 @@ export class RegimeManager {
     }
     this.currentKey = key;
     this.currentFocusCtx = fctx;
+    this.onRegimeChange?.(this.current, key);
   }
 }

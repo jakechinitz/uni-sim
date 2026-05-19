@@ -12,7 +12,9 @@ import { TelegrapherField } from '../render/Telegrapher';
 import { hawkingSolar, scrambling, formatSI } from '../core/Closure';
 import { M_SUN } from '../util/units';
 
-const N_STARS = 6000;
+// 3500 stars is plenty visually; previous 6000 doubled the per-frame
+// star integration cost without noticeable visual gain.
+const N_STARS = 3500;
 const R_GAL   = 18;
 const G_SIM   = 0.0008;
 const A0_SIM  = 0.00010;
@@ -46,6 +48,7 @@ export class GalaxyRegime extends Regime {
   private fieldLines: THREE.LineSegments;
   private flMaterial: THREE.LineBasicMaterial;
   private picked: THREE.Sprite;
+  private focusReticle!: THREE.Sprite;
   private time = 0;
   private wallTime = 0;
   private telegrapher = new TelegrapherField(2.0, new THREE.Color(0x9ee0ff));
@@ -307,6 +310,18 @@ export class GalaxyRegime extends Regime {
 
     // Telegrapher wave group — emits when objects are flicked
     this.scene.add(this.telegrapher.group);
+
+    // Focus reticle on the star the camera ray is pointing at
+    this.focusReticle = new THREE.Sprite(new THREE.SpriteMaterial({
+      map: radialGlow(256, 'rgba(0,0,0,0)', 'rgba(122,215,255,0.9)', 'rgba(122,215,255,0)'),
+      color: 0x7ad7ff,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false, depthTest: false,
+      transparent: true, opacity: 0.85
+    }));
+    this.focusReticle.scale.setScalar(0.8);
+    this.focusReticle.visible = false;
+    this.scene.add(this.focusReticle);
   }
 
   // Total mass at galactic centre — drives initial circular speeds for star
@@ -383,18 +398,30 @@ export class GalaxyRegime extends Regime {
     // Halo follows the central BH if one exists; otherwise dim halo at origin
     const central = this.bhs.find(b => b.isCentral);
     this.haloMesh.position.copy(central ? central.mesh.position : new THREE.Vector3());
+    const haloPulse = 0.85 + 0.15 * Math.sin(this.wallTime * 0.9);
     (this.haloMesh.material as THREE.SpriteMaterial).opacity =
-      ctx.entanglementOn ? (central ? 0.35 : 0.18) : 0;
+      ctx.entanglementOn ? (central ? 0.55 * haloPulse : 0.30 * haloPulse) : 0;
     this.fieldLines.visible = ctx.entanglementOn;
     this.flMaterial.opacity = ctx.entanglementOn ? 0.4 : 0;
 
     // Telegrapher waves advance with sim-time (paper §17: D/τ₀ = c²)
     this.telegrapher.update(visDt);
 
-    // Subtle camera pan driven by wall time so it never freezes
-    const phi = this.wallTime * 0.05;
-    this.camera.position.x = Math.sin(phi) * R_GAL * 0.1;
-    this.camera.lookAt(0, 0, 0);
+    // Camera owned by OrbitControls. Focus reticle highlights the star the
+    // camera ray currently points at — zoom in from here drills into THAT
+    // star's solar system.
+    if (ctx.focus.starId) {
+      const idx = parseInt(ctx.focus.starId.replace('st-', ''), 10);
+      const s = this.stars[idx];
+      if (s) {
+        this.focusReticle.visible = true;
+        this.focusReticle.position.set(s.body.pos[0], s.body.pos[1], s.body.pos[2]);
+      } else {
+        this.focusReticle.visible = false;
+      }
+    } else {
+      this.focusReticle.visible = false;
+    }
   }
 
   bloomStrength(_ctx: RegimeContext): number {
