@@ -74,7 +74,7 @@ export class App {
         this.state = data;
         this.clock.scrub    = data.scrub;
         this.clock.speedExp = data.speedExp;
-        this.regimes.setSeed(data.seed);
+        this.regimes.setSeed(data.seed);          // also resets focus
         this.regimes.setZoom(data.zoom);
         this.composer.enableBloom(data.toggles.bloom);
         syncControls(data);
@@ -86,7 +86,7 @@ export class App {
         this.state.scrub = 0;
         this.state.zoom  = 0.07;
         this.state.overrides = {};
-        this.regimes.setSeed(newSeed);
+        this.regimes.setSeed(newSeed);            // also resets focus
         this.regimes.setZoom(this.state.zoom);
         this.clock.scrub = 0;
         syncControls(this.state);
@@ -121,10 +121,14 @@ export class App {
     this.prevTime = tGyr;
 
     const ede  = edePulse(tGyr);
-
-    this.regimes.setZoom(this.state.zoom);
     const slice = decodeZoom(this.state.zoom);
     this.state.regime = slice.regime;
+
+    // Continuously refresh focus from the current regime (so the next
+    // regime transition has the right child), then apply zoom — which
+    // commits focus + rebuilds if (regime, focus) changed.
+    this.regimes.pumpFocus();
+    this.regimes.setZoom(this.state.zoom);
 
     this.regimes.update({
       seed: this.state.seed,
@@ -133,7 +137,8 @@ export class App {
       edePulse: ede,
       entanglementOn: this.state.toggles.entangle,
       dtWall,
-      rate: this.clock.speed
+      rate: this.clock.speed,
+      focus: this.regimes.focus
     }, dtSim);
 
     this.regimes.render(dtWall);

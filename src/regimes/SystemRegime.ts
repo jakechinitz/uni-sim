@@ -10,10 +10,9 @@ import { Body, accelOnRAR, stepLeapfrog } from '../core/Gravity';
 import { TelegrapherField } from '../render/Telegrapher';
 import { PhotonField } from '../render/Photons';
 
-const N_PLANETS = 7;
 const G_SIM     = 4.0;
 const A0_SIM    = 1e-9;     // effectively Newton at this scale
-const STAR_MASS = 1000;
+const N_BG_STARS = 1400;    // background "galactic neighbourhood" stars
 
 interface PlanetView {
   body: Body;
@@ -46,16 +45,78 @@ export class SystemRegime extends Regime {
 
     const rng = mulberry32(hashStr(`system|${seed}`));
 
+    // Distant "galactic neighbourhood" — sparse field of background stars
+    // visible at the edges of the frame so this regime feels embedded in
+    // the surrounding galaxy rather than being an isolated set piece.
+    const bgGeom = new THREE.BufferGeometry();
+    const bgPos = new Float32Array(N_BG_STARS * 3);
+    const bgCol = new THREE.Color();
+    const bgColArr = new Float32Array(N_BG_STARS * 3);
+    for (let i = 0; i < N_BG_STARS; i++) {
+      // Sphere-shell distribution far from the system (r ~ 700..1500)
+      const u = rng() * 2 - 1;
+      const theta = rng() * Math.PI * 2;
+      const s = Math.sqrt(1 - u * u);
+      const R = 700 + rng() * 800;
+      bgPos[i * 3 + 0] = R * s * Math.cos(theta);
+      bgPos[i * 3 + 1] = R * u * 0.4;        // flattened to a disk
+      bgPos[i * 3 + 2] = R * s * Math.sin(theta);
+      // Realistic stellar colour distribution: mostly cool reds/oranges,
+      // some yellows, occasional blue
+      const t = rng();
+      if (t < 0.6)      bgCol.setHSL(0.04 + rng() * 0.08, 0.6, 0.55);
+      else if (t < 0.9) bgCol.setHSL(0.12 + rng() * 0.05, 0.6, 0.65);
+      else              bgCol.setHSL(0.6 + rng() * 0.08, 0.7, 0.75);
+      bgColArr[i * 3 + 0] = bgCol.r;
+      bgColArr[i * 3 + 1] = bgCol.g;
+      bgColArr[i * 3 + 2] = bgCol.b;
+    }
+    bgGeom.setAttribute('position', new THREE.BufferAttribute(bgPos, 3));
+    bgGeom.setAttribute('color',    new THREE.BufferAttribute(bgColArr, 3));
+    const bgMat = new THREE.PointsMaterial({
+      size: 1.8,
+      vertexColors: true,
+      sizeAttenuation: true,
+      transparent: true,
+      opacity: 0.95,
+      depthWrite: false,
+      blending: THREE.AdditiveBlending
+    });
+    this.scene.add(new THREE.Points(bgGeom, bgMat));
+
+    // Per-seed star: pick a type → mass, colour, size
+    // Wide range so different focused stars give visibly different systems.
+    const stellarType = rng();  // 0..1
+    let starMass: number, starHot: string, starMid: string, starCool: string, starScale: number;
+    if (stellarType < 0.45) {
+      // M dwarf: small, red, cool
+      starMass = 350 + rng() * 200;
+      starHot = '#ffe2a8'; starMid = '#ff9858'; starCool = 'rgba(255,80,40,0)';
+      starScale = 28;
+    } else if (stellarType < 0.85) {
+      // G/K star (Sun-ish): medium, yellow
+      starMass = 700 + rng() * 600;
+      starHot = '#fffae0'; starMid = '#ffcc70'; starCool = 'rgba(255,140,40,0)';
+      starScale = 40;
+    } else {
+      // O/B giant: large, blue-white, hot
+      starMass = 1500 + rng() * 1200;
+      starHot = '#f0faff'; starMid = '#a8d0ff'; starCool = 'rgba(70,140,255,0)';
+      starScale = 65;
+    }
+    const N_PLANETS = 3 + Math.floor(rng() * 7);   // 3..9 planets per system
+
     // Central star
-    this.starBody = { id: 'star', pos: [0, 0, 0], vel: [0, 0, 0], mass: STAR_MASS };
+    this.starBody = { id: 'star', pos: [0, 0, 0], vel: [0, 0, 0], mass: starMass };
     this.starMesh = new THREE.Sprite(new THREE.SpriteMaterial({
-      map: radialGlow(512, '#fffae0', '#ffcc70', 'rgba(255,140,40,0)'),
+      map: radialGlow(512, starHot, starMid, starCool),
       blending: THREE.AdditiveBlending, depthWrite: false, transparent: true
     }));
-    this.starMesh.scale.setScalar(40);
+    this.starMesh.scale.setScalar(starScale);
     this.starMesh.userData = { type: 'star' };
     this.scene.add(this.starMesh);
     this.draggable.add(this.starMesh);
+    const STAR_MASS = starMass;
 
     // Planets
     for (let i = 0; i < N_PLANETS; i++) {
