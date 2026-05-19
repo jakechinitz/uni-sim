@@ -1,5 +1,15 @@
 // Shared interface for every scale regime.
 import * as THREE from 'three';
+// Focus carries the user's drill-down path through the zoom hierarchy:
+// "I'm looking at THIS galaxy in COSMIC", "this star in that galaxy", etc.
+// Each regime can both READ focus (so e.g. SystemRegime builds the star
+// the user picked) and WRITE focus (so e.g. CosmicRegime publishes "this
+// is the galaxy nearest the camera" when zoom approaches GALAXY).
+export interface FocusState {
+  galaxyId: string | null;     // ID of the cosmic-web galaxy you're inside
+  starId:   string | null;     // ID of the galactic star you're inside
+}
+
 export interface RegimeContext {
   seed: number;
   time: number;            // Gyr
@@ -8,6 +18,7 @@ export interface RegimeContext {
   entanglementOn: boolean;
   dtWall: number;          // wall-clock seconds since last frame (UI animations)
   rate: number;            // current sim_sec / wall_sec from the speed slider
+  focus: FocusState;
 }
 
 export interface DragTarget {
@@ -43,6 +54,11 @@ export abstract class Regime {
   abstract bloomStrength(ctx: RegimeContext): number;
   // Optional: paper-physics hover panel for the intersected object.
   hoverInfo(_intersection: THREE.Intersection): HoverInfo | null { return null; }
+  // Regimes that publish a focus child (e.g. COSMIC picks the focused
+  // galaxy nearest the camera ray) override this. Called per frame for
+  // continuous tracking, and once more at the moment of regime transition
+  // to commit the final selection. Default: no change.
+  publishFocus(): Partial<FocusState> | null { return null; }
 
   resize(w: number, h: number) {
     this.camera.aspect = w / h;

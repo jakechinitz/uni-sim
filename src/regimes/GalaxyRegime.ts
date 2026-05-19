@@ -2,7 +2,7 @@
 // has flat rotation curve (paper §14 — no dark matter needed).
 
 import * as THREE from 'three';
-import { Regime, RegimeContext, DragTarget, HoverInfo } from './Regime';
+import { Regime, RegimeContext, DragTarget, HoverInfo, FocusState } from './Regime';
 import { mulberry32 } from '../core/Rng';
 import { hashStr } from '../util/hash';
 import { radialGlow } from '../render/Glow';
@@ -399,6 +399,34 @@ export class GalaxyRegime extends Regime {
 
   bloomStrength(_ctx: RegimeContext): number {
     return 1.05;
+  }
+
+  // Publish the focused star = the star nearest the camera's forward ray.
+  // Index → "st-NNNN" id, stable per seed. Called every frame; committed
+  // when zoom crosses into SYSTEM.
+  publishFocus(): Partial<FocusState> | null {
+    const camPos = this.camera.position;
+    const fwd = new THREE.Vector3();
+    this.camera.getWorldDirection(fwd);
+    let bestI = -1;
+    let bestPerp2 = Infinity;
+    // Sample a stride — checking 6000 stars/frame is wasteful when we just
+    // need the nearest to the camera ray; the brightest few hundred are
+    // what the user can see anyway.
+    const stride = 7;
+    for (let i = 0; i < this.stars.length; i += stride) {
+      const p = this.stars[i].body.pos;
+      const dx = p[0] - camPos.x;
+      const dy = p[1] - camPos.y;
+      const dz = p[2] - camPos.z;
+      const along = dx * fwd.x + dy * fwd.y + dz * fwd.z;
+      if (along < 0.5) continue;
+      const total2 = dx * dx + dy * dy + dz * dz;
+      const perp2  = total2 - along * along;
+      if (perp2 < bestPerp2) { bestPerp2 = perp2; bestI = i; }
+    }
+    if (bestI < 0) return null;
+    return { starId: `st-${bestI}` };
   }
 
   pick(intersection: THREE.Intersection): DragTarget | null {

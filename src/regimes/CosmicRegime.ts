@@ -3,7 +3,7 @@
 // neighbours feel RAR pulls (deep-MOND tail = long-range coupling).
 
 import * as THREE from 'three';
-import { Regime, RegimeContext, DragTarget } from './Regime';
+import { Regime, RegimeContext, DragTarget, FocusState } from './Regime';
 import { mulberry32, gauss } from '../core/Rng';
 import { radialGlow } from '../render/Glow';
 import { Body, accelOnRAR, stepLeapfrog } from '../core/Gravity';
@@ -251,10 +251,56 @@ export class CosmicRegime extends Regime {
 
     this.haloGroup.visible = ctx.entanglementOn;
 
-    // Slow camera drift for cinematic feel
-    const phi = ctx.time * 0.02;
-    this.camera.position.x = Math.sin(phi) * BOX * 0.05;
-    this.camera.lookAt(0, 0, 0);
+    // Camera: if a galaxy is focused, smoothly look at it (so zooming in
+    // visibly heads toward the chosen target); else slow cinematic pan.
+    const lookTarget = this.focusedGalaxyPos(ctx.focus.galaxyId);
+    if (lookTarget) {
+      const ease = Math.min(1, ctx.dtWall * 2.0);
+      this._lookSmooth.x += (lookTarget.x - this._lookSmooth.x) * ease;
+      this._lookSmooth.y += (lookTarget.y - this._lookSmooth.y) * ease;
+      this._lookSmooth.z += (lookTarget.z - this._lookSmooth.z) * ease;
+      this.camera.lookAt(this._lookSmooth);
+    } else {
+      const phi = ctx.time * 0.02;
+      this.camera.position.x = Math.sin(phi) * BOX * 0.05;
+      this.camera.lookAt(0, 0, 0);
+    }
+  }
+
+  // Returns the world-space position of the focused galaxy, or null.
+  private focusedGalaxyPos(id: string | null): THREE.Vector3 | null {
+    if (!id) return null;
+    const g = this.galaxies.find(g => g.id === id);
+    if (!g) return null;
+    return g.mesh.position;
+  }
+  // Smoothed look-at target so the camera glides rather than snaps.
+  private _lookSmooth = new THREE.Vector3();
+
+  // Publish the focused galaxy = the lit galaxy nearest the camera's
+  // forward ray. Called every frame; the resulting focus is used at the
+  // moment of crossing into the GALAXY band.
+  publishFocus(): Partial<FocusState> | null {
+    const camPos = this.camera.position;
+    const fwd = new THREE.Vector3();
+    this.camera.getWorldDirection(fwd);
+    let bestId: string | null = null;
+    let bestPerp2 = Infinity;
+    for (const g of this.galaxies) {
+      if (g.fadeIn < 0.25) continue;        // skip dim/unborn galaxies
+      const dx = g.body.pos[0] * this.edeBreath - camPos.x;
+      const dy = g.body.pos[1] * this.edeBreath - camPos.y;
+      const dz = g.body.pos[2] * this.edeBreath - camPos.z;
+      const along = dx * fwd.x + dy * fwd.y + dz * fwd.z;
+      if (along < 0.5) continue;            // behind / very close
+      const total2 = dx * dx + dy * dy + dz * dz;
+      const perp2  = total2 - along * along;
+      // weight by galaxy mass/size so bigger galaxies are preferred when ties
+      const weighted = perp2 / (g.size + 0.4);
+      if (weighted < bestPerp2) { bestPerp2 = weighted; bestId = g.id; }
+    }
+    if (bestId === null) return null;
+    return { galaxyId: bestId };
   }
 
   bloomStrength(ctx: RegimeContext): number {
