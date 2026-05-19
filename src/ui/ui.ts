@@ -125,6 +125,22 @@ export function bindUI(cb: UICallbacks) {
     cb.state.toggles.disk = togDisk.checked;
     cb.onChange();
   });
+
+  // ↺ Big Bang — reset cosmic time to 0, slow the speed so the first
+  // Gyr of structure formation unfolds visibly, play forward.
+  const btnBang = document.getElementById('btn-bigbang') as HTMLButtonElement | null;
+  if (btnBang) {
+    btnBang.addEventListener('click', () => {
+      cb.state.scrub = 0;
+      cb.state.speedExp = 13.0;        // ≈ Myr/s — slow enough for the early universe to read
+      cb.state.direction = 1;
+      cb.state.playing = true;
+      sliderTime.value  = String(cb.state.scrub);
+      sliderSpeed.value = String(cb.state.speedExp);
+      paintTransport();
+      cb.onChange();
+    });
+  }
 }
 
 export function setHud(parts: { time: string; zoom: string; speed: string; epoch: string }) {

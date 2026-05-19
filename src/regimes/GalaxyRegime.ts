@@ -185,7 +185,9 @@ export class GalaxyRegime extends Regime {
         outerSoft:  { value: 0.96 },
         coreColor:  { value: new THREE.Color('#fff0c8') },
         midColor:   { value: new THREE.Color('#ffaa90') },
-        edgeColor:  { value: new THREE.Color('#7ad7ff') }
+        edgeColor:  { value: new THREE.Color('#7ad7ff') },
+        // Driven by cosmic time so the disk fades up as the galaxy assembles
+        alphaGlobal: { value: 1 }
       },
       vertexShader: /* glsl */`
         varying vec2 vP;
@@ -195,7 +197,7 @@ export class GalaxyRegime extends Regime {
         }
       `,
       fragmentShader: /* glsl */`
-        uniform float time, arms, twist, innerCut, outerSoft;
+        uniform float time, arms, twist, innerCut, outerSoft, alphaGlobal;
         uniform vec3  coreColor, midColor, edgeColor;
         varying vec2 vP;
         float hash(vec2 p){ p=fract(p*vec2(123.34,456.21)); p+=dot(p,p+34.345); return fract(p.x*p.y); }
@@ -221,7 +223,7 @@ export class GalaxyRegime extends Regime {
           float intensity = (0.6 * core + 0.45 * armStr) * disk;
           vec3 col = mix(edgeColor, midColor, smoothstep(0.7, 0.2, t));
           col = mix(col, coreColor, core);
-          gl_FragColor = vec4(col, clamp(intensity, 0.0, 1.0));
+          gl_FragColor = vec4(col, clamp(intensity * alphaGlobal, 0.0, 1.0));
         }
       `
     });
@@ -433,9 +435,23 @@ export class GalaxyRegime extends Regime {
     this.time += visDt;
     this.wallTime += ctx.dtWall;
     this.spiralMat.uniforms.time.value = this.time;
+    // Cosmic-time-driven assembly: the disk and stars fade up as the
+    // galaxy forms. Roughly: nothing pre-first-stars (≲100 Myr), assembling
+    // through 1 Gyr, fully visible by ~3 Gyr. Past that, slow brightening
+    // tracks SMBH growth.
+    const tG = ctx.time;          // Gyr
+    const galaxyAlpha = Math.min(1, Math.max(0, (tG - 0.1) / 2.0));
+    this.spiralMat.uniforms.alphaGlobal.value = galaxyAlpha;
+    this.starMaterial.opacity = 0.15 + 0.85 * galaxyAlpha;
+    // Central SMBH grows with time (visualised as a slow accretion-disk
+    // scale-up). Multiplier 0.85 → 1.15 over 0..13.8 Gyr.
+    const smbhGrowth = 0.85 + 0.3 * Math.min(1, tG / 13.8);
+    for (const bh of this.bhs) {
+      if (bh.isCentral) bh.mesh.scale.setScalar(smbhGrowth);
+    }
     // Disk toggle — when off, just the stars + BHs are visible (much more
     // legible from below the galactic plane).
-    this.spiralMesh.visible = ctx.diskOn;
+    this.spiralMesh.visible = ctx.diskOn && galaxyAlpha > 0.01;
     for (const b of this.bhs) b.mesh.tick(this.time);
 
     // BH-BH gravity (stellar BHs orbit the central SMBH and feel each

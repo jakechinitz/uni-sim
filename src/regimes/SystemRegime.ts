@@ -145,11 +145,11 @@ export class SystemRegime extends Regime {
         new THREE.SphereGeometry(radius, 48, 32),
         new THREE.MeshStandardMaterial({
           color: planetCol,
-          roughness: 0.55,    // some specular sheen so the planet reads as solid
+          roughness: 0.55,
           metalness: 0.0,
-          // Tiny self-glow so silhouettes stay readable on the night side
-          // without erasing the terminator
-          emissive: planetCol.clone().multiplyScalar(0.06)
+          emissive: planetCol.clone().multiplyScalar(0.06),
+          transparent: true,
+          opacity: 0
         })
       );
       mesh.userData = { type: 'planet', index: i };
@@ -252,6 +252,21 @@ export class SystemRegime extends Regime {
     // Update visuals
     this.starMesh.position.set(this.starBody.pos[0], this.starBody.pos[1], this.starBody.pos[2]);
     this.starLight.position.copy(this.starMesh.position);
+
+    // Cosmic-time evolution: planets form ~hundreds of Myr after the star
+    // ignites. Fade them in from t = 0.2 Gyr (pre-planet, just star+
+    // accretion disk feel) to t = 0.8 Gyr (fully formed).
+    const sysAlpha = Math.min(1, Math.max(0, (ctx.time - 0.2) / 0.6));
+    for (const pv of this.planets) {
+      const m = pv.mesh.material as THREE.MeshStandardMaterial;
+      m.opacity = sysAlpha;
+      if (pv.ring) {
+        const rm = pv.ring.material as THREE.MeshBasicMaterial;
+        rm.opacity = 0.7 * sysAlpha;
+      }
+      // Orbit trail also fades in
+      (pv.trail.material as THREE.LineBasicMaterial).opacity = 0.55 * sysAlpha;
+    }
     for (const pv of this.planets) {
       pv.mesh.position.set(pv.body.pos[0], pv.body.pos[1], pv.body.pos[2]);
       if (pv.ring) pv.ring.rotation.z += visDt * 0.1;

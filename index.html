@@ -20,10 +20,27 @@
         <button id="btn-forward" data-tip="Play forward in time">⏩</button>
       </div>
 
-      <label class="slider" data-tip="Scrub cosmic time from the Big Bang (0) to today (13.8 Gyr). Past today, play keeps going into the future.">
+      <label class="slider time-slider" data-tip="Scrub cosmic time from the Big Bang (0) to today (13.8 Gyr). Past today, play keeps going into the future.">
         <span class="lbl">time</span>
-        <input id="slider-time" type="range" min="0" max="1" step="0.0001" value="0" />
+        <div class="time-track">
+          <input id="slider-time" type="range" min="0" max="1" step="0.0001" value="0" />
+          <div class="time-epochs">
+            <!-- Epoch ticks. Positions computed from the scrubToTime
+                 inverse so they land at the right scrub value. -->
+            <!-- Positions computed from the exponential scrub→time map:
+                 t(s) = 13.8 * (e^(8s)-1)/(e^8-1). The early universe is
+                 compressed visually because we spend most slider real
+                 estate showing matter-domination through today. -->
+            <span class="ep" style="left:0%"     data-tip="Big Bang · t = 0 · the singularity">Big Bang</span>
+            <span class="ep" style="left:1%"     data-tip="EDE Pulse · z ≈ 3000 (~50 kyr after Big Bang) — paper §18 Hubble-tension mechanism fires here">EDE</span>
+            <span class="ep" style="left:39%"    data-tip="First stars + black holes form (~100 Myr)">First stars</span>
+            <span class="ep" style="left:67%"    data-tip="First galaxies condense (~1 Gyr)">Galaxies</span>
+            <span class="ep" style="left:84%"    data-tip="Cosmic-web filaments materialise (~4 Gyr)">Web</span>
+            <span class="ep" style="left:100%"   data-tip="Present day (13.8 Gyr) — past this point you're in the future">Today</span>
+          </div>
+        </div>
         <span class="val" id="hud-time">t = 0 · z = ∞ · Big Bang</span>
+        <button id="btn-bigbang" class="pill-btn small" data-tip="Reset to the Big Bang and play forward at a slow pace so you can watch each epoch unfold">↺ Big Bang</button>
       </label>
 
       <label class="slider zoom-slider" data-tip="Pick the scale you're looking at. Bands: cosmic web → galaxy → solar system → tetrahedral substrate.">
