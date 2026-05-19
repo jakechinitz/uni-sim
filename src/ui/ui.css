@@ -267,6 +267,55 @@ html, body {
   line-height: 1.4;
 }
 
+/* Floating tooltip — driven by JS so it can avoid the bottom-of-screen
+   clipping native title attributes have. Any element with data-tip="..."
+   shows the text above it on hover. */
+#tip {
+  position: fixed;
+  pointer-events: none;
+  z-index: 60;
+  padding: 6px 9px;
+  background: rgba(15,18,26,0.96);
+  border: 1px solid rgba(255,255,255,0.14);
+  border-radius: 6px;
+  font-size: 11px;
+  color: #e8eef6;
+  letter-spacing: 0.02em;
+  max-width: 280px;
+  line-height: 1.45;
+  box-shadow: 0 6px 24px rgba(0,0,0,0.55);
+  opacity: 0;
+  transform: translateY(2px);
+  transition: opacity 80ms ease, transform 80ms ease;
+}
+#tip.on { opacity: 1; transform: translateY(0); }
+
+/* Zoom slider with regime band labels stacked underneath. The track-with-
+   labels approach lets the user see "I'm in GALAXY" without reading the
+   HUD readout. */
+.zoom-slider .zoom-track {
+  flex: 1; min-width: 100px;
+  display: flex; flex-direction: column;
+  gap: 2px;
+}
+.zoom-bands {
+  position: relative;
+  height: 12px;
+  font-size: 8.5px;
+  color: rgba(255,255,255,0.32);
+  letter-spacing: 0.10em;
+}
+.zoom-bands span {
+  position: absolute; top: 0;
+  text-align: center;
+  user-select: none;
+}
+.zoom-bands span::before {
+  content: ''; position: absolute;
+  top: -3px; left: 0; right: 0;
+  border-top: 1px solid rgba(255,255,255,0.08);
+}
+
 #cursor {
   position: fixed; pointer-events: none;
   width: 22px; height: 22px;

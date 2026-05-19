@@ -27,6 +27,7 @@ export function bindUI(cb: UICallbacks) {
   const btnNew      = el<HTMLButtonElement>('btn-newseed');
   const togEnt      = el<HTMLInputElement>('toggle-entangle');
   const togBlm      = el<HTMLInputElement>('toggle-bloom');
+  const togDisk     = el<HTMLInputElement>('toggle-disk');
 
   // Init from state. paintTransport / refreshPresetState rely on `chips`
   // being declared, so we set up the chip refs BEFORE the first repaint
@@ -50,6 +51,9 @@ export function bindUI(cb: UICallbacks) {
   sliderSpeed.value = String(cb.state.speedExp);
   togEnt.checked    = cb.state.toggles.entangle;
   togBlm.checked    = cb.state.toggles.bloom;
+  // Backfill disk toggle for saves predating it (defensive: undefined → true)
+  cb.state.toggles.disk = cb.state.toggles.disk ?? true;
+  togDisk.checked   = cb.state.toggles.disk;
   paintTransport();
 
   sliderTime.addEventListener('input', () => {
@@ -117,6 +121,10 @@ export function bindUI(cb: UICallbacks) {
     cb.state.toggles.bloom = togBlm.checked;
     cb.onChange();
   });
+  togDisk.addEventListener('change', () => {
+    cb.state.toggles.disk = togDisk.checked;
+    cb.onChange();
+  });
 }
 
 export function setHud(parts: { time: string; zoom: string; speed: string; epoch: string }) {
@@ -132,6 +140,7 @@ export function syncControls(state: SaveData) {
   (el<HTMLInputElement>('slider-speed')).value = String(state.speedExp);
   (el<HTMLInputElement>('toggle-entangle')).checked = state.toggles.entangle;
   (el<HTMLInputElement>('toggle-bloom')).checked    = state.toggles.bloom;
+  (el<HTMLInputElement>('toggle-disk')).checked     = state.toggles.disk ?? true;
   (el<HTMLButtonElement>('btn-play')).textContent = state.playing ? '⏸' : '▶';
   (el<HTMLButtonElement>('btn-rewind')).classList.toggle('on',  state.direction === -1 && state.playing);
   (el<HTMLButtonElement>('btn-forward')).classList.toggle('on', state.direction ===  1 && state.playing);

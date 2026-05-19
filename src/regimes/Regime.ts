@@ -16,6 +16,7 @@ export interface RegimeContext {
   zoomIntra: number;       // 0..1 inside the regime
   edePulse: number;        // 0..1 strength of the Hubble-tension pulse
   entanglementOn: boolean;
+  diskOn: boolean;         // galaxy spiral overlay toggle
   dtWall: number;          // wall-clock seconds since last frame (UI animations)
   rate: number;            // current sim_sec / wall_sec from the speed slider
   focus: FocusState;

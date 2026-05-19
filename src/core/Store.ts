@@ -16,7 +16,7 @@ export interface SaveData {
   speedExp: number;       // log10 of forward sim_sec/wall_sec
   direction: 1 | -1;      // +1 forward, -1 rewind (separate from speedExp)
   playing: boolean;       // play/pause state (separate from speed/direction)
-  toggles: { entangle: boolean; bloom: boolean };
+  toggles: { entangle: boolean; bloom: boolean; disk: boolean };
   overrides: Record<string, [number, number, number, number, number, number]>;
 }
 
@@ -72,7 +72,7 @@ export function emptySave(seed: number): SaveData {
     speedExp: SPEED_EXP_DEFAULT,
     direction: 1,
     playing: true,
-    toggles: { entangle: false, bloom: true },
+    toggles: { entangle: false, bloom: true, disk: true },
     overrides: {}
   };
 }

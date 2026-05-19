@@ -184,6 +184,7 @@ export class App {
       zoomIntra: slice.intra,
       edePulse: ede,
       entanglementOn: this.state.toggles.entangle,
+      diskOn: this.state.toggles.disk ?? true,
       dtWall,
       rate: this.clock.speed,
       focus: this.regimes.focus
