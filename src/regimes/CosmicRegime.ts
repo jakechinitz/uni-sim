@@ -10,7 +10,9 @@ import { Body, accelOnRAR, stepLeapfrog } from '../core/Gravity';
 import { hashStr } from '../util/hash';
 import { smoothstep, clamp01 } from '../util/lerp';
 
-const N_GAL = 380;
+// N_GAL drives the dominant CPU cost: O(N²) per-pair RAR integration per
+// substep. 220 keeps the cosmic-web looking dense without choking the CPU.
+const N_GAL = 220;
 const BOX   = 60;        // sim units
 
 // Sim-internal gravity coupling chosen so visible motion is on order of seconds
@@ -39,6 +41,9 @@ export class CosmicRegime extends Regime {
   private filPositions: Float32Array;
   private filMaterial: THREE.LineBasicMaterial;
   private radNoiseMesh: THREE.Mesh;
+  private focusReticle!: THREE.Sprite;
+  private _nbodyTick = 0;
+  private wallTime = 0;
 
   constructor(aspect: number, seed: number) {
     super(aspect);
@@ -182,9 +187,23 @@ export class CosmicRegime extends Regime {
     this.filaments = new THREE.LineSegments(this.filGeom, this.filMaterial);
     this.filaments.userData.pairs = pairs;
     this.scene.add(this.filaments);
+
+    // Cyan ring sprite that follows the currently focused galaxy — gives
+    // the user a clear "this is the one I'd zoom into" cue while flying
+    // the camera around the cosmic web.
+    this.focusReticle = new THREE.Sprite(new THREE.SpriteMaterial({
+      map: radialGlow(256, 'rgba(0,0,0,0)', 'rgba(122,215,255,0.85)', 'rgba(122,215,255,0)'),
+      color: 0x7ad7ff,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false, depthTest: false,
+      transparent: true, opacity: 0.85
+    }));
+    this.focusReticle.visible = false;
+    this.scene.add(this.focusReticle);
   }
 
   update(ctx: RegimeContext, dt: number): void {
+    this.wallTime += ctx.dtWall;
     // Big bang flash and radiation-era visibility
     const t = ctx.time;
     const tinyT = 5e-5;             // ~50 kyr in Gyr
@@ -214,17 +233,21 @@ export class CosmicRegime extends Regime {
       const m = g.mesh.material as THREE.SpriteMaterial;
       m.opacity = g.fadeIn;
       const haloMat = g.halo!.material as THREE.SpriteMaterial;
-      haloMat.opacity = ctx.entanglementOn ? 0.22 * g.fadeIn : 0;
+      // Pulse halo opacity so the entanglement overlay reads as alive,
+      // not a static circle. Pulse runs on wall time so it never freezes.
+      const pulse = 0.78 + 0.22 * Math.sin(this.wallTime * 1.3 + g.body.pos[0] * 0.05);
+      haloMat.opacity = ctx.entanglementOn ? 0.55 * g.fadeIn * pulse : 0;
     }
 
-    // N-body step with RAR — softened, bounded. Cap visual sim-time per frame
-    // so fast-forward doesn't blow up the leapfrog.
-    const bodies = this.galaxies.map(g => g.body);
-    const substeps = 2;
-    const visDt = Math.min(0.04, Math.abs(dt)) * Math.sign(dt || 1);
-    const dtSim = visDt / substeps;
-    for (let s = 0; s < substeps; s++) {
-      stepLeapfrog(bodies, dtSim, (i, all) => accelOnRAR(i, all, G_SIM, A0_SIM));
+    // N-body step with RAR. O(N²) per substep is the dominant CPU load
+    // in COSMIC; throttle to every other frame (≈30 Hz physics) and use
+    // a single substep with a longer dt. Cosmic positions change so
+    // slowly visually that the user can't tell.
+    this._nbodyTick = (this._nbodyTick + 1) % 2;
+    if (this._nbodyTick === 0) {
+      const bodies = this.galaxies.map(g => g.body);
+      const visDt = Math.min(0.06, Math.abs(dt)) * Math.sign(dt || 1);
+      stepLeapfrog(bodies, visDt, (i, all) => accelOnRAR(i, all, G_SIM, A0_SIM));
     }
     // Apply breath to positions (visual cosmic expansion at z~3000)
     for (const g of this.galaxies) {
@@ -251,31 +274,17 @@ export class CosmicRegime extends Regime {
 
     this.haloGroup.visible = ctx.entanglementOn;
 
-    // Camera: if a galaxy is focused, smoothly look at it (so zooming in
-    // visibly heads toward the chosen target); else slow cinematic pan.
-    const lookTarget = this.focusedGalaxyPos(ctx.focus.galaxyId);
-    if (lookTarget) {
-      const ease = Math.min(1, ctx.dtWall * 2.0);
-      this._lookSmooth.x += (lookTarget.x - this._lookSmooth.x) * ease;
-      this._lookSmooth.y += (lookTarget.y - this._lookSmooth.y) * ease;
-      this._lookSmooth.z += (lookTarget.z - this._lookSmooth.z) * ease;
-      this.camera.lookAt(this._lookSmooth);
+    // Camera is owned by OrbitControls — don't touch it here. The focus
+    // reticle below highlights which galaxy the camera ray is currently on.
+    const focused = ctx.focus.galaxyId ? this.galaxies.find(g => g.id === ctx.focus.galaxyId) : null;
+    if (focused) {
+      this.focusReticle.visible = true;
+      this.focusReticle.position.copy(focused.mesh.position);
+      this.focusReticle.scale.setScalar(focused.size * 6 + 0.2);
     } else {
-      const phi = ctx.time * 0.02;
-      this.camera.position.x = Math.sin(phi) * BOX * 0.05;
-      this.camera.lookAt(0, 0, 0);
+      this.focusReticle.visible = false;
     }
   }
-
-  // Returns the world-space position of the focused galaxy, or null.
-  private focusedGalaxyPos(id: string | null): THREE.Vector3 | null {
-    if (!id) return null;
-    const g = this.galaxies.find(g => g.id === id);
-    if (!g) return null;
-    return g.mesh.position;
-  }
-  // Smoothed look-at target so the camera glides rather than snaps.
-  private _lookSmooth = new THREE.Vector3();
 
   // Publish the focused galaxy = the lit galaxy nearest the camera's
   // forward ray. Called every frame; the resulting focus is used at the

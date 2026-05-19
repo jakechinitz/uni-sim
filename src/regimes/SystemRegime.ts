@@ -251,12 +251,8 @@ export class SystemRegime extends Regime {
       attr.needsUpdate = true;
     }
 
-    // Camera pan on wall time so it stays alive at all speeds
-    const r = 230, phi = this.wallTime * 0.02;
-    this.camera.position.set(Math.cos(phi) * r, 90, Math.sin(phi) * r);
-    this.camera.lookAt(0, 0, 0);
-
-    this.fieldOpacity += ((ctx.entanglementOn ? 0.45 : 0) - this.fieldOpacity) * Math.min(1, ctx.dtWall * 4);
+    // Camera owned by OrbitControls.
+    this.fieldOpacity += ((ctx.entanglementOn ? 0.7 : 0) - this.fieldOpacity) * Math.min(1, ctx.dtWall * 4);
     (this.fieldLines.material as THREE.LineBasicMaterial).opacity = this.fieldOpacity;
     this.fieldLines.visible = this.fieldOpacity > 0.01;
 
