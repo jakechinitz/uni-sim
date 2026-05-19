@@ -11,6 +11,7 @@ import { Body } from '../core/Gravity';
 import { TelegrapherField } from '../render/Telegrapher';
 import { hawkingSolar, scrambling, formatSI } from '../core/Closure';
 import { M_SUN } from '../util/units';
+import { imfSample, mainSeqLifetime, SUPERNOVA_MASS } from '../core/StellarLifecycle';
 
 // 3500 stars is plenty visually; previous 6000 doubled the per-frame
 // star integration cost without noticeable visual gain.
@@ -40,19 +41,6 @@ interface Star {
   spawnedBH: boolean;  // true once we've added a stellar BH from a supernova
 }
 
-// Stellar masses follow a Salpeter IMF dN/dM ∝ M^-2.35. Sample by inverse-CDF.
-function imfSample(rng: () => number): number {
-  const Mmin = 0.15, Mmax = 50, a = 1.35;
-  const u = rng();
-  const A = Math.pow(Mmin, -a) - (Math.pow(Mmin, -a) - Math.pow(Mmax, -a)) * u;
-  return Math.pow(A, -1 / a);
-}
-
-// Approx main-sequence lifetime in Gyr. Sun-like ≈ 10 Gyr; massive stars
-// burn through in tens of Myr.
-function mainSeqLifetime(massMsun: number): number {
-  return 10 * Math.pow(massMsun, -2.5);
-}
 
 export class GalaxyRegime extends Regime {
   private stars: Star[] = [];
@@ -573,10 +561,14 @@ export class GalaxyRegime extends Regime {
     }
 
     // Stars under combined BH gravity (RAR — paper §14). Each star feels
-    // every surviving BH (central SMBH + stellar remnants).
+    // every surviving BH (central SMBH + stellar remnants). If a star
+    // wanders inside a BH's tidal radius, it's disrupted: marked dead
+    // (death flash will fire next frame) and the BH disk brightens
+    // transiently.
+    const TIDAL_K = 0.025;      // r_tidal = TIDAL_K * sqrt(M) — visual cue
     for (let s = 0; s < sub; s++) {
       for (const star of this.stars) {
-        if (star.body.fixed) continue;
+        if (star.body.fixed || star.state === 'dead') continue;
         let ax = 0, ay = 0, az = 0;
         for (const bh of this.bhs) {
           const rx = star.body.pos[0] - bh.body.pos[0];
@@ -584,6 +576,15 @@ export class GalaxyRegime extends Regime {
           const rz = star.body.pos[2] - bh.body.pos[2];
           const r2 = rx * rx + ry * ry + rz * rz + 1e-3;
           const dist = Math.sqrt(r2);
+          // Tidal-disruption: too-close encounter consumes the star
+          const rT = TIDAL_K * Math.sqrt(bh.mass);
+          if (dist < rT) {
+            star.state = 'dead';
+            star.deathT = tG;
+            // Pulse the BH's accretion disk to register the feeding event
+            (bh.mesh as any).feedPulse = ((bh.mesh as any).feedPulse ?? 0) + 0.6;
+            break;
+          }
           const gBar = G_SIM * bh.mass / r2;
           const y    = gBar / A0_SIM;
           const nu   = 0.5 + Math.sqrt(0.25 + 1 / Math.max(y, 1e-30));
@@ -591,6 +592,7 @@ export class GalaxyRegime extends Regime {
           const k    = -gObs / dist;
           ax += k * rx; ay += k * ry; az += k * rz;
         }
+        if (star.state === 'dead') continue;
         star.body.vel[0] += dtSim * ax;
         star.body.vel[1] += dtSim * ay;
         star.body.vel[2] += dtSim * az;
@@ -605,7 +607,6 @@ export class GalaxyRegime extends Regime {
     // (low-mass → white dwarf).
     const arr = this.posAttr.array as Float32Array;
     const col = this.colAttr.array as Float32Array;
-    const SUPERNOVA_MASS = 8;            // M☉ — threshold for core-collapse
     const FLASH_DURATION = 0.0008;       // Gyr — supernova visual lasts ~1 Myr
     for (let i = 0; i < this.stars.length; i++) {
       const s = this.stars[i];
