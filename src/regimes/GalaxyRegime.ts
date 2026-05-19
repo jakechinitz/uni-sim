@@ -63,6 +63,12 @@ export class GalaxyRegime extends Regime {
   private wallTime = 0;
   private telegrapher = new TelegrapherField(2.0, new THREE.Color(0x9ee0ff));
   private manyPasts = new ManyPasts(new THREE.Color(0x9b8dff), 2.5);
+  // Supernova flare pool — when a massive star dies it spawns one of
+  // these expanding-fading sprites at its position so the explosion
+  // reads as an actual fireball rather than a "dead pixel" point.
+  private snFlares: { sp: THREE.Sprite; birthT: number; type: 'sn' | 'pn' }[] = [];
+  private snFlareTex!: THREE.Texture;
+  private snGroup = new THREE.Group();
 
   constructor(aspect: number, seed: number) {
     super(aspect);
@@ -366,6 +372,8 @@ export class GalaxyRegime extends Regime {
     // Telegrapher wave group — emits when objects are flicked
     this.scene.add(this.telegrapher.group);
     this.scene.add(this.manyPasts.group);
+    this.snFlareTex = radialGlow(256, 'rgba(255,255,255,1)', 'rgba(255,180,90,0.6)', 'rgba(255,40,20,0)');
+    this.scene.add(this.snGroup);
 
     // Focus reticle on the star the camera ray is pointing at
     this.focusReticle = new THREE.Sprite(new THREE.SpriteMaterial({
@@ -431,6 +439,53 @@ export class GalaxyRegime extends Regime {
       }
     }
     return merged;
+  }
+
+  // Spawn an expanding-fading explosion sprite at the dying star's
+  // position. Massive stars get a bigger, hotter SN flare; low-mass
+  // get a softer planetary-nebula glow. Drives the "this is actually
+  // a supernova, not a bright pixel" reading.
+  private spawnSNFlare(s: Star, tG: number) {
+    const type: 'sn' | 'pn' = s.mass >= SUPERNOVA_MASS ? 'sn' : 'pn';
+    const sp = new THREE.Sprite(new THREE.SpriteMaterial({
+      map: this.snFlareTex,
+      color: type === 'sn' ? new THREE.Color(1.6, 1.4, 1.0) : new THREE.Color(1.0, 0.8, 1.3),
+      blending: THREE.AdditiveBlending,
+      transparent: true,
+      depthWrite: false,
+      opacity: 1
+    }));
+    sp.position.set(s.body.pos[0], s.body.pos[1], s.body.pos[2]);
+    sp.scale.setScalar(0.4);
+    this.snGroup.add(sp);
+    this.snFlares.push({ sp, birthT: tG, type });
+  }
+
+  // Per-frame animation of active SN flares. Called from update(). Each
+  // flare scales up rapidly, peaks, then fades. Recycled when faded.
+  private updateSNFlares(tG: number) {
+    const SN_DUR = 0.0015;     // Gyr of visible explosion (~1.5 Myr)
+    for (let i = this.snFlares.length - 1; i >= 0; i--) {
+      const f = this.snFlares[i];
+      const age = tG - f.birthT;
+      if (age < 0 || age > SN_DUR) {
+        this.snGroup.remove(f.sp);
+        (f.sp.material as THREE.SpriteMaterial).dispose();
+        this.snFlares.splice(i, 1);
+        continue;
+      }
+      const frac = age / SN_DUR;
+      // Scale: rapid expansion in the first 20 %, then plateau, then
+      // gentle further growth as the shell propagates
+      const maxScale = f.type === 'sn' ? 4.5 : 2.0;
+      const scale = 0.4 + maxScale * Math.min(1, frac * 5);
+      // Opacity: peaks early, fades over the rest
+      const op = f.type === 'sn'
+        ? Math.max(0, 1 - Math.pow(frac, 0.7))
+        : Math.max(0, 0.7 * (1 - frac));
+      f.sp.scale.setScalar(scale);
+      (f.sp.material as THREE.SpriteMaterial).opacity = op;
+    }
   }
 
   // Core-collapse supernova: take the dying star's position + velocity,
@@ -636,9 +691,10 @@ export class GalaxyRegime extends Regime {
           b = b * (1 - 0.4 * x);
           if (frac > 0.97) s.state = 'giant';
         } else {
-          // Death event begins
+          // Death event begins — spawn an explosion sprite
           s.state = 'dead';
           s.deathT = tG;
+          this.spawnSNFlare(s, tG);
         }
       }
       if (s.state === 'giant') {
@@ -647,7 +703,11 @@ export class GalaxyRegime extends Regime {
         r = Math.min(1.4, r + 0.5);
         g = Math.min(0.9, g * 0.6);
         b = Math.min(0.5, b * 0.4);
-        if (frac > 1.0) { s.state = 'dead'; s.deathT = tG; }
+        if (frac > 1.0) {
+          s.state = 'dead';
+          s.deathT = tG;
+          this.spawnSNFlare(s, tG);
+        }
       }
       if (s.state === 'dead') {
         const sinceDeath = tG - s.deathT;
@@ -702,6 +762,7 @@ export class GalaxyRegime extends Regime {
 
     // Telegrapher waves advance with sim-time (paper §17: D/τ₀ = c²)
     this.telegrapher.update(visDt);
+    this.updateSNFlares(tG);
 
     // Many-Pasts ghost cloud (paper §21). Only visible when rewinding
     // and the toggle is on — drives off ctx.manyPastsOn (App already
@@ -756,7 +817,7 @@ export class GalaxyRegime extends Regime {
       const dist = Math.sqrt(dx * dx + dy * dy + dz * dz) + 1e-3;
       // Lens NDC radius ≈ schwarzschild_visual_radius / dist, capped
       const rs = 0.0025 * Math.sqrt(bh.mass);   // visual prop. to √M
-      const ndcR = Math.min(0.15, 12 * rs / dist);
+      const ndcR = Math.min(0.07, 7 * rs / dist);
       if (ndcR < 0.005) continue;        // sub-pixel — skip
       out.push({ worldPos: bh.mesh.position, radius: ndcR });
     }

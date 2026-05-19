@@ -19,6 +19,7 @@ interface CameraControls { enabled: boolean; }
 
 interface Pending {
   target: DragTarget;
+  hoverInfo: HoverInfo | null;
   downX: number;
   downY: number;
   downT: number;
@@ -34,6 +35,7 @@ export class DragController {
   private active: DragTarget | null = null;
   private pending: Pending | null = null;
   private pendingTimer: number | null = null;
+  private bgClickStart: { x: number; y: number; t: number } | null = null;
   private dragPlane = new THREE.Plane();
   private cursor = document.getElementById('cursor')!;
   private canvas: HTMLCanvasElement;
@@ -42,6 +44,11 @@ export class DragController {
   private velSamples: { p: THREE.Vector3; t: number }[] = [];
   private controls: CameraControls | null = null;
   onHover: (info: HoverInfo | null, clientX: number, clientY: number) => void = () => {};
+  // Fired when the user clicks a draggable without dragging — used by the
+  // App to pin the hover card so they can see what zooming in would target.
+  onClickTarget: (info: HoverInfo | null, target: DragTarget, x: number, y: number) => void = () => {};
+  // Fired when the user clicks empty canvas (no target hit, no drag)
+  onClickBackground: () => void = () => {};
 
   attachControls(c: CameraControls | null) { this.controls = c; }
 
@@ -83,12 +90,19 @@ export class DragController {
     this.raycaster.setFromCamera(this.pointerNdc, cam);
     const group = this.getDraggables();
     const hits = this.raycaster.intersectObjects(group.children, true);
-    if (hits.length === 0) return;             // free-space click → controls
+    if (hits.length === 0) {
+      // Free-space pointerdown: record a "background click in flight" so
+      // we can detect a release-without-drag and dismiss any pinned card.
+      this.bgClickStart = { x: ev.clientX, y: ev.clientY, t: performance.now() };
+      return;
+    }
+    this.bgClickStart = null;
     const target = this.regimePick(hits[0]);
     if (!target) return;
     // ARM a pending pickup. Don't grab yet.
     this.pending = {
       target,
+      hoverInfo: this.regimeHover(hits[0]),
       downX: ev.clientX, downY: ev.clientY,
       downT: performance.now(),
       pointerId: ev.pointerId
@@ -189,9 +203,25 @@ export class DragController {
       return;
     }
     if (this.pending) {
-      // Released before commit → treat as a click, no-op. Re-enable controls.
+      // Released before commit → it's a click. Re-enable controls, then
+      // fire the onClickTarget hook so the App can pin a preview card.
+      const p = this.pending;
       this.clearPending();
       if (this.controls) this.controls.enabled = true;
+      this.onClickTarget(p.hoverInfo, p.target, _ev.clientX, _ev.clientY);
+      return;
+    }
+    // Background click — released without drag on empty canvas. Used to
+    // dismiss any pinned preview card. We require ≤ 5 px of movement so
+    // an orbit-drag never accidentally dismisses.
+    if (this.bgClickStart) {
+      const dx = _ev.clientX - this.bgClickStart.x;
+      const dy = _ev.clientY - this.bgClickStart.y;
+      const dt = performance.now() - this.bgClickStart.t;
+      this.bgClickStart = null;
+      if (dx * dx + dy * dy < 25 && dt < 400) {
+        this.onClickBackground();
+      }
     }
   };
 }

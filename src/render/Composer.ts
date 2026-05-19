@@ -71,12 +71,12 @@ export class Composer {
             vec2 d = vec2((uv.x - c.x) * aspect, uv.y - c.y);
             float r = length(d);
             float R = bhRadii[i];
-            // Only apply within ~3·R so distant BHs don't blanket-warp
-            // each other. The R²/r kernel falls off naturally, but adding
-            // a smooth-step taper keeps the boundary clean.
-            if (r > 1e-4 && r < R * 3.0) {
-              float taper = 1.0 - smoothstep(R * 2.0, R * 3.0, r);
-              float defl = clamp(R * R / r, 0.0, R * 0.8) * taper;
+            // Subtle warp — only within ~2·R, deflection capped at 0.35·R,
+            // so the lensing is a clear visual cue without obscuring the
+            // scene. (Earlier 0.8·R cap was overwhelming.)
+            if (r > 1e-4 && r < R * 2.0) {
+              float taper = 1.0 - smoothstep(R * 1.2, R * 2.0, r);
+              float defl = clamp(R * R / r, 0.0, R * 0.35) * taper;
               vec2 off = (d / r) * defl;
               uv.x -= off.x / aspect;
               uv.y -= off.y;

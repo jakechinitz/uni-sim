@@ -9,7 +9,7 @@ import { z as cosmoZ, epoch as cosmoEpoch, edePulse } from './core/Cosmology';
 import { decodeZoom } from './core/Camera';
 import { bindUI, setHud, syncControls } from './ui/ui';
 import { bindClosurePanel } from './ui/Closure';
-import { updateHoverCard } from './ui/HoverCard';
+import { updateHoverCard, pinHoverCard, unpinHoverCard } from './ui/HoverCard';
 import { SaveData, autosave, emptySave, loadLocal } from './core/Store';
 import { DragController } from './core/Drag';
 import { formatRate } from './util/units';
@@ -85,6 +85,11 @@ export class App {
       (i) => this.regimes.hoverInfo(i)
     );
     this.drag.onHover = (info, x, y) => updateHoverCard(info, x, y);
+    // Click a draggable → pin its hover card so you can see what you'd
+    // drill into. Click empty canvas (no drag) → unpin.
+    this.drag.onClickTarget = (info, _target, x, y) => pinHoverCard(info, x, y);
+    this.drag.onClickBackground = () => unpinHoverCard();
+    window.addEventListener('keydown', (ev) => { if (ev.key === 'Escape') unpinHoverCard(); });
 
     // Install OrbitControls on the initial regime and re-install on every
     // regime swap so the controls track whichever camera is active.

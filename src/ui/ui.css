@@ -266,6 +266,30 @@ html, body {
   font-size: 10px;
   line-height: 1.4;
 }
+#hover-card.pinned {
+  pointer-events: auto;
+  border-color: rgba(122,215,255,0.5);
+  box-shadow: 0 8px 24px rgba(0,0,0,0.7), 0 0 0 1px rgba(122,215,255,0.18);
+}
+#hover-card .ht-x {
+  float: right;
+  background: transparent;
+  border: none;
+  color: var(--dim);
+  font-size: 16px;
+  line-height: 1;
+  margin-top: -2px;
+  cursor: pointer;
+}
+#hover-card .ht-x:hover { color: #fff; }
+#hover-card .ht-hint {
+  margin-top: 6px;
+  padding-top: 6px;
+  border-top: 1px solid rgba(255,255,255,0.08);
+  color: var(--accent);
+  font-size: 10px;
+  letter-spacing: 0.05em;
+}
 
 /* Floating tooltip — driven by JS so it can avoid the bottom-of-screen
    clipping native title attributes have. Any element with data-tip="..."
