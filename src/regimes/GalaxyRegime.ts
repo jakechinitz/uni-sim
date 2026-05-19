@@ -32,6 +32,26 @@ interface BHView {
 interface Star {
   body: Body;
   baseColor: THREE.Color;
+  mass: number;        // M☉ — drives lifetime + death channel
+  birth: number;       // cosmic time (Gyr) when this star ignites
+  lifetime: number;    // Gyr — main-sequence span, t ∝ M^−2.5
+  state: 'main' | 'giant' | 'dead';
+  deathT: number;      // cosmic Gyr when it died (Infinity if still alive)
+  spawnedBH: boolean;  // true once we've added a stellar BH from a supernova
+}
+
+// Stellar masses follow a Salpeter IMF dN/dM ∝ M^-2.35. Sample by inverse-CDF.
+function imfSample(rng: () => number): number {
+  const Mmin = 0.15, Mmax = 50, a = 1.35;
+  const u = rng();
+  const A = Math.pow(Mmin, -a) - (Math.pow(Mmin, -a) - Math.pow(Mmax, -a)) * u;
+  return Math.pow(A, -1 / a);
+}
+
+// Approx main-sequence lifetime in Gyr. Sun-like ≈ 10 Gyr; massive stars
+// burn through in tens of Myr.
+function mainSeqLifetime(massMsun: number): number {
+  return 10 * Math.pow(massMsun, -2.5);
 }
 
 export class GalaxyRegime extends Regime {
@@ -271,7 +291,19 @@ export class GalaxyRegime extends Regime {
         vel: [tx * vCirc, 0, tz * vCirc],
         mass: 0.0001    // negligible relative to BH; stars are test particles
       };
-      this.stars.push({ body, baseColor: c });
+      // Stellar lifecycle. Mass from Salpeter IMF; birth time spread across
+      // the first 800 Myr so the population doesn't all ignite together
+      // (looks like a sequence of supernovas firing as time advances).
+      const mass = imfSample(rng);
+      const birth = 0.05 + rng() * 0.8;     // Gyr
+      this.stars.push({
+        body, baseColor: c,
+        mass, birth,
+        lifetime: mainSeqLifetime(mass),
+        state: 'main',
+        deathT: Infinity,
+        spawnedBH: false
+      });
     }
 
     this.posAttr = new THREE.BufferAttribute(positions, 3).setUsage(THREE.DynamicDrawUsage);
@@ -410,6 +442,45 @@ export class GalaxyRegime extends Regime {
     return merged;
   }
 
+  // Core-collapse supernova: take the dying star's position + velocity,
+  // emit a telegrapher ringdown, push a new stellar BH (a few M☉) into the
+  // dynamics. The new BH then orbits / merges with other BHs naturally.
+  private spawnStellarBHFromSupernova(s: Star) {
+    // Remnant mass ≈ 30 % of initial (rest blown off in the explosion)
+    const remMsun  = Math.max(3, s.mass * 0.30);
+    const simMass  = 3 + (remMsun - 3) * 0.5;       // sim-mass scale
+    const radius   = 0.05 + 0.03 * (remMsun / 30);
+    // Younger (hotter) BHs visually
+    const hot = new THREE.Color(1, 0.95, 0.85);
+    const mid = new THREE.Color(1, 0.55, 0.30);
+    const cool = new THREE.Color('#ffa050');
+    const mesh = new BlackHole({
+      radius, diskInner: 2.2, diskOuter: 5.0,
+      diskTilt: Math.random() * Math.PI, hot, mid, cool
+    });
+    mesh.position.set(s.body.pos[0], s.body.pos[1], s.body.pos[2]);
+    mesh.userData = { type: 'bh', index: this.bhs.length };
+    this.scene.add(mesh);
+    this.draggable.add(mesh);
+    this.bhs.push({
+      mesh,
+      body: {
+        id: `bh-sn-${s.body.id}`,
+        pos: [s.body.pos[0], s.body.pos[1], s.body.pos[2]],
+        vel: [s.body.vel[0], s.body.vel[1], s.body.vel[2]],
+        mass: simMass,
+        fixed: false
+      },
+      mass: simMass,
+      realMassSolar: remMsun,
+      isCentral: false,
+      diskTiltAxis: new THREE.Vector3(1, 0, 0),
+      diskTiltAngle: 0
+    });
+    // Supernova ringdown
+    this.telegrapher.emit(mesh.position.clone(), R_GAL * 1.3, 1.2);
+  }
+
   private centralMass(): number {
     const central = this.bhs.find(b => b.isCentral);
     return central?.mass ?? 0;
@@ -528,14 +599,83 @@ export class GalaxyRegime extends Regime {
         star.body.pos[2] += dtSim * star.body.vel[2];
       }
     }
-    // Push positions into the point cloud
+    // Push positions + lifecycle-driven colors into the point cloud.
+    // Per-star: compute age, redden+brighten as we approach the lifetime,
+    // then either flash (supernova → spawn a new stellar BH) or fade
+    // (low-mass → white dwarf).
     const arr = this.posAttr.array as Float32Array;
+    const col = this.colAttr.array as Float32Array;
+    const SUPERNOVA_MASS = 8;            // M☉ — threshold for core-collapse
+    const FLASH_DURATION = 0.0008;       // Gyr — supernova visual lasts ~1 Myr
     for (let i = 0; i < this.stars.length; i++) {
-      arr[i * 3 + 0] = this.stars[i].body.pos[0];
-      arr[i * 3 + 1] = this.stars[i].body.pos[1];
-      arr[i * 3 + 2] = this.stars[i].body.pos[2];
+      const s = this.stars[i];
+      arr[i * 3 + 0] = s.body.pos[0];
+      arr[i * 3 + 1] = s.body.pos[1];
+      arr[i * 3 + 2] = s.body.pos[2];
+
+      const age = tG - s.birth;
+      let r = s.baseColor.r, g = s.baseColor.g, b = s.baseColor.b;
+      if (age < 0) {
+        // Pre-ignition (unborn)
+        r = g = b = 0;
+      } else if (s.state === 'main') {
+        const frac = age / s.lifetime;
+        if (frac < 0.85) {
+          // Main sequence — base color (slight blue dim while young)
+          const young = 1 - 0.15 * (1 - frac / 0.85);
+          r *= young; g *= young; b *= young;
+        } else if (frac < 1.0) {
+          // Subgiant → giant: redden and brighten
+          const x = (frac - 0.85) / 0.15;        // 0..1
+          r = r * (1 + 0.6 * x) + 0.4 * x;
+          g = g * (1 + 0.2 * x);
+          b = b * (1 - 0.4 * x);
+          if (frac > 0.97) s.state = 'giant';
+        } else {
+          // Death event begins
+          s.state = 'dead';
+          s.deathT = tG;
+        }
+      }
+      if (s.state === 'giant') {
+        // Late red-giant phase — keep red & bright until death
+        const frac = age / s.lifetime;
+        r = Math.min(1.4, r + 0.5);
+        g = Math.min(0.9, g * 0.6);
+        b = Math.min(0.5, b * 0.4);
+        if (frac > 1.0) { s.state = 'dead'; s.deathT = tG; }
+      }
+      if (s.state === 'dead') {
+        const sinceDeath = tG - s.deathT;
+        if (sinceDeath < FLASH_DURATION) {
+          // Death flash: white-hot for both channels. ACES tone-mapper
+          // turns these HDR values into a clean overexposed dot.
+          const flash = 1 - sinceDeath / FLASH_DURATION;
+          if (s.mass >= SUPERNOVA_MASS) {
+            r = 3 * flash + 1; g = 3 * flash + 0.6; b = 2 * flash + 0.3;
+          } else {
+            // Planetary-nebula style softer flare
+            r = 1.6 * flash + 0.4; g = 1.4 * flash + 0.3; b = 1.0 * flash + 0.5;
+          }
+        } else if (s.mass >= SUPERNOVA_MASS) {
+          // Massive → core-collapse BH. Spawn once, then make star invisible.
+          if (!s.spawnedBH) {
+            s.spawnedBH = true;
+            this.spawnStellarBHFromSupernova(s);
+          }
+          r = g = b = 0;
+        } else {
+          // Low-mass → cooling white dwarf. Tiny, dim, slightly blue.
+          const cooled = Math.exp(-sinceDeath * 0.6);     // fade over Gyr
+          r = 0.30 * cooled; g = 0.40 * cooled; b = 0.55 * cooled;
+        }
+      }
+      col[i * 3 + 0] = r;
+      col[i * 3 + 1] = g;
+      col[i * 3 + 2] = b;
     }
     this.posAttr.needsUpdate = true;
+    this.colAttr.needsUpdate = true;
 
     // BH drag-follow
     for (const bh of this.bhs) {
