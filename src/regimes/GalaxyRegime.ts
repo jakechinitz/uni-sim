@@ -365,6 +365,9 @@ export class GalaxyRegime extends Regime {
     this.time += visDt;
     this.wallTime += ctx.dtWall;
     this.spiralMat.uniforms.time.value = this.time;
+    // Disk toggle — when off, just the stars + BHs are visible (much more
+    // legible from below the galactic plane).
+    this.spiralMesh.visible = ctx.diskOn;
     for (const b of this.bhs) b.mesh.tick(this.time);
 
     // Integrate stars under combined BH gravity using RAR. Each star feels
@@ -427,15 +430,19 @@ export class GalaxyRegime extends Regime {
     // Telegrapher waves advance with sim-time (paper §17: D/τ₀ = c²)
     this.telegrapher.update(visDt);
 
-    // Camera owned by OrbitControls. Focus reticle highlights the star the
-    // camera ray currently points at — zoom in from here drills into THAT
-    // star's solar system.
-    if (ctx.focus.starId) {
-      const idx = parseInt(ctx.focus.starId.replace('st-', ''), 10);
+    // Focus reticle — only shown when zoom is in the second half of the
+    // GALAXY band (i.e. user is about to drill into a star). At low intra
+    // the reticle just clutters the view, especially when stars are bunched
+    // near the BH and it appears to "blink" between them.
+    const showReticle = ctx.zoomIntra > 0.5 && !!ctx.focus.starId;
+    if (showReticle) {
+      const idx = parseInt(ctx.focus.starId!.replace('st-', ''), 10);
       const s = this.stars[idx];
       if (s) {
         this.focusReticle.visible = true;
         this.focusReticle.position.set(s.body.pos[0], s.body.pos[1], s.body.pos[2]);
+        const fade = Math.min(1, (ctx.zoomIntra - 0.5) * 3.0);   // fade in over the last half
+        (this.focusReticle.material as THREE.SpriteMaterial).opacity = 0.6 * fade;
       } else {
         this.focusReticle.visible = false;
       }
@@ -445,7 +452,9 @@ export class GalaxyRegime extends Regime {
   }
 
   bloomStrength(_ctx: RegimeContext): number {
-    return 1.05;
+    // Cut from 1.05 — at galaxy scale the spiral disk + photon ring +
+    // accretion disk all bloom together and washed the screen out.
+    return 0.45;
   }
 
   // Publish the focused star = the star nearest the camera's forward ray.

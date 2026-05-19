@@ -336,7 +336,7 @@ export class SubstrateRegime extends Regime {
     this.telegrapher.update(dtClamp);
   }
 
-  bloomStrength(_ctx: RegimeContext): number { return 0.7; }
+  bloomStrength(_ctx: RegimeContext): number { return 0.4; }
 
   pick(intersection: THREE.Intersection): DragTarget | null {
     const obj = intersection.object;

@@ -276,11 +276,16 @@ export class CosmicRegime extends Regime {
 
     // Camera is owned by OrbitControls — don't touch it here. The focus
     // reticle below highlights which galaxy the camera ray is currently on.
-    const focused = ctx.focus.galaxyId ? this.galaxies.find(g => g.id === ctx.focus.galaxyId) : null;
+    // Same logic as galaxy: only show the "I'd drill into this" reticle
+    // when zoom is in the second half of the COSMIC band.
+    const focused = ctx.zoomIntra > 0.5 && ctx.focus.galaxyId
+      ? this.galaxies.find(g => g.id === ctx.focus.galaxyId) : null;
     if (focused) {
       this.focusReticle.visible = true;
       this.focusReticle.position.copy(focused.mesh.position);
       this.focusReticle.scale.setScalar(focused.size * 6 + 0.2);
+      const fade = Math.min(1, (ctx.zoomIntra - 0.5) * 3.0);
+      (this.focusReticle.material as THREE.SpriteMaterial).opacity = 0.7 * fade;
     } else {
       this.focusReticle.visible = false;
     }
@@ -313,8 +318,7 @@ export class CosmicRegime extends Regime {
   }
 
   bloomStrength(ctx: RegimeContext): number {
-    const baseline = 0.95;
-    return baseline + 1.5 * ctx.edePulse;
+    return 0.55 + 0.9 * ctx.edePulse;
   }
 
   pick(intersection: THREE.Intersection): DragTarget | null {

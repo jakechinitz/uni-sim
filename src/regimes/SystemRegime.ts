@@ -30,6 +30,7 @@ export class SystemRegime extends Regime {
   private starMesh: THREE.Sprite;
   private planets: PlanetView[] = [];
   private fieldLines: THREE.LineSegments;
+  private entGroup!: THREE.Group;
   private fieldOpacity = 0;
   private time = 0;
   private wallTime = 0;
@@ -230,7 +231,11 @@ export class SystemRegime extends Regime {
       blending: THREE.AdditiveBlending, depthWrite: false
     });
     this.fieldLines = new THREE.LineSegments(g, m);
-    this.scene.add(this.fieldLines);
+    // Parent the entanglement network to a group that tracks the star,
+    // so dragging the star also moves its field lines.
+    this.entGroup = new THREE.Group();
+    this.entGroup.add(this.fieldLines);
+    this.scene.add(this.entGroup);
     this.scene.add(this.telegrapher.group);
     this.scene.add(this.photons.group);
   }
@@ -264,7 +269,10 @@ export class SystemRegime extends Regime {
     // Camera owned by OrbitControls.
     this.fieldOpacity += ((ctx.entanglementOn ? 0.7 : 0) - this.fieldOpacity) * Math.min(1, ctx.dtWall * 4);
     (this.fieldLines.material as THREE.LineBasicMaterial).opacity = this.fieldOpacity;
-    this.fieldLines.visible = this.fieldOpacity > 0.01;
+    // Field tracks the star so it updates when you drag the star around
+    this.entGroup.position.copy(this.starMesh.position);
+    this.entGroup.rotation.y += ctx.dtWall * 0.1;
+    this.entGroup.visible = this.fieldOpacity > 0.01;
 
     this.telegrapher.update(visDt);
 
@@ -284,7 +292,7 @@ export class SystemRegime extends Regime {
   }
 
   bloomStrength(_ctx: RegimeContext): number {
-    return 0.85;
+    return 0.4;
   }
 
   pick(intersection: THREE.Intersection): DragTarget | null {
