@@ -9,6 +9,7 @@ import { radialGlow } from '../render/Glow';
 import { BlackHole } from '../render/BlackHole';
 import { Body } from '../core/Gravity';
 import { TelegrapherField } from '../render/Telegrapher';
+import { ManyPasts } from '../render/ManyPasts';
 import { hawkingSolar, scrambling, formatSI } from '../core/Closure';
 import { M_SUN } from '../util/units';
 import { imfSample, mainSeqLifetime, SUPERNOVA_MASS } from '../core/StellarLifecycle';
@@ -61,6 +62,7 @@ export class GalaxyRegime extends Regime {
   private time = 0;
   private wallTime = 0;
   private telegrapher = new TelegrapherField(2.0, new THREE.Color(0x9ee0ff));
+  private manyPasts = new ManyPasts(new THREE.Color(0x9b8dff), 2.5);
 
   constructor(aspect: number, seed: number) {
     super(aspect);
@@ -363,6 +365,7 @@ export class GalaxyRegime extends Regime {
 
     // Telegrapher wave group — emits when objects are flicked
     this.scene.add(this.telegrapher.group);
+    this.scene.add(this.manyPasts.group);
 
     // Focus reticle on the star the camera ray is pointing at
     this.focusReticle = new THREE.Sprite(new THREE.SpriteMaterial({
@@ -700,6 +703,19 @@ export class GalaxyRegime extends Regime {
     // Telegrapher waves advance with sim-time (paper §17: D/τ₀ = c²)
     this.telegrapher.update(visDt);
 
+    // Many-Pasts ghost cloud (paper §21). Only visible when rewinding
+    // and the toggle is on — drives off ctx.manyPastsOn (App already
+    // requires direction=−1 to set it true).
+    this.manyPasts.update(
+      this.bhs.map(b => ({
+        id: b.body.id,
+        pos: b.mesh.position,
+        scale: 1.2 + 0.7 * Math.log10(Math.max(1, b.mass / 10))
+      })),
+      ctx.dtWall,
+      ctx.manyPastsOn
+    );
+
     // Focus reticle — only shown when zoom is in the second half of the
     // GALAXY band (i.e. user is about to drill into a star). At low intra
     // the reticle just clutters the view, especially when stars are bunched
@@ -725,6 +741,26 @@ export class GalaxyRegime extends Regime {
     // Cut from 1.05 — at galaxy scale the spiral disk + photon ring +
     // accretion disk all bloom together and washed the screen out.
     return 0.45;
+  }
+
+  // BHs that get gravitational lensing applied around them at this scale.
+  // Apparent radius scales with sim mass + scene proximity, capped so a
+  // close SMBH doesn't warp the whole frame.
+  lensSources(): { worldPos: THREE.Vector3; radius: number }[] {
+    const out: { worldPos: THREE.Vector3; radius: number }[] = [];
+    const cam = this.camera.position;
+    for (const bh of this.bhs) {
+      const dx = bh.mesh.position.x - cam.x;
+      const dy = bh.mesh.position.y - cam.y;
+      const dz = bh.mesh.position.z - cam.z;
+      const dist = Math.sqrt(dx * dx + dy * dy + dz * dz) + 1e-3;
+      // Lens NDC radius ≈ schwarzschild_visual_radius / dist, capped
+      const rs = 0.0025 * Math.sqrt(bh.mass);   // visual prop. to √M
+      const ndcR = Math.min(0.15, 12 * rs / dist);
+      if (ndcR < 0.005) continue;        // sub-pixel — skip
+      out.push({ worldPos: bh.mesh.position, radius: ndcR });
+    }
+    return out;
   }
 
   // Publish the focused star = the star nearest the camera's forward ray.

@@ -17,6 +17,7 @@ export interface RegimeContext {
   edePulse: number;        // 0..1 strength of the Hubble-tension pulse
   entanglementOn: boolean;
   diskOn: boolean;         // galaxy spiral overlay toggle
+  manyPastsOn: boolean;    // §21 ghost-trajectory overlay (visible when rewinding)
   dtWall: number;          // wall-clock seconds since last frame (UI animations)
   rate: number;            // current sim_sec / wall_sec from the speed slider
   focus: FocusState;
@@ -60,6 +61,10 @@ export abstract class Regime {
   // continuous tracking, and once more at the moment of regime transition
   // to commit the final selection. Default: no change.
   publishFocus(): Partial<FocusState> | null { return null; }
+  // Black holes that should drive the gravitational-lensing post-process.
+  // Each entry: world-space position + NDC-space lens radius (0.05 ≈
+  // a few percent of the screen).
+  lensSources(): { worldPos: THREE.Vector3; radius: number }[] { return []; }
 
   resize(w: number, h: number) {
     this.camera.aspect = w / h;
