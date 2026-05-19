@@ -34,6 +34,7 @@ export class SystemRegime extends Regime {
   private time = 0;
   private wallTime = 0;
   private telegrapher = new TelegrapherField(30, new THREE.Color(0xffd9a0));
+  private starLight!: THREE.PointLight;
   // Photon field — propSpeed 1000 scene-units/sim-sec → visible at "Light"
   // preset (~5 wall-sec to traverse the system), blurs at faster speeds.
   private photons = new PhotonField(800, 1000, 320, new THREE.Color(0xffeac0), 0.7);
@@ -140,12 +141,16 @@ export class SystemRegime extends Regime {
       const planetCol = new THREE.Color().setHSL(hue / 360, 0.55, 0.6);
 
       const mesh = new THREE.Mesh(
-        new THREE.SphereGeometry(radius, 32, 24),
+        new THREE.SphereGeometry(radius, 48, 32),
         new THREE.MeshStandardMaterial({
           color: planetCol,
-          roughness: 0.6,
-          metalness: 0.05,
-          emissive: planetCol.clone().multiplyScalar(0.04)
+          // Matte + zero self-glow so the planet's day/night terminator
+          // from the star's PointLight reads cleanly. No emissive means
+          // the night side stays dark, which is what the user wanted
+          // to see.
+          roughness: 0.85,
+          metalness: 0.0,
+          emissive: 0x000000
         })
       );
       mesh.userData = { type: 'planet', index: i };
@@ -188,10 +193,14 @@ export class SystemRegime extends Regime {
       this.planets.push(pv);
     }
 
-    // Lights
-    const star = new THREE.PointLight(0xffe0a0, 4, 3000, 1.6);
-    this.scene.add(star);
-    this.scene.add(new THREE.AmbientLight(0x202028, 0.4));
+    // Lighting — bright point at the star, very low ambient so each planet
+    // has a clean day/night terminator. The star's PointLight follows
+    // starBody position; .decay = 1.0 gives a gentler falloff so distant
+    // planets still register a lit side.
+    this.starLight = new THREE.PointLight(0xfff2c8, 9, 4000, 1.0);
+    this.starLight.position.set(0, 0, 0);
+    this.scene.add(this.starLight);
+    this.scene.add(new THREE.AmbientLight(0x06080d, 0.18));
 
     // Entanglement field — dipolar field lines
     const lineCount = 24;
@@ -239,6 +248,7 @@ export class SystemRegime extends Regime {
 
     // Update visuals
     this.starMesh.position.set(this.starBody.pos[0], this.starBody.pos[1], this.starBody.pos[2]);
+    this.starLight.position.copy(this.starMesh.position);
     for (const pv of this.planets) {
       pv.mesh.position.set(pv.body.pos[0], pv.body.pos[1], pv.body.pos[2]);
       if (pv.ring) pv.ring.rotation.z += visDt * 0.1;

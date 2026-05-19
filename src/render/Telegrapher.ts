@@ -35,14 +35,20 @@ export class TelegrapherField {
   }
 
   emit(center: THREE.Vector3, maxR: number, amp = 1, glowTex?: THREE.Texture) {
-    const geom = new THREE.SphereGeometry(1, 28, 18);
+    // Thin ring (one segment, low subdivision) — reads as a wavefront,
+    // not a screen-filling sphere. Faces nearest plane to camera.
+    const geom = new THREE.RingGeometry(0.95, 1.0, 64, 1);
     const shellMat = new THREE.MeshBasicMaterial({
       color: this.color, transparent: true, opacity: 0,
-      wireframe: true, depthWrite: false,
+      side: THREE.DoubleSide, depthWrite: false,
       blending: THREE.AdditiveBlending
     });
     const mesh = new THREE.Mesh(geom, shellMat);
     mesh.position.copy(center);
+    // Make the ring face roughly upward (XZ-plane) — works well for both
+    // galaxy disks and substrate lattices. The slight tilt keeps it visible
+    // at most camera angles.
+    mesh.rotation.x = -Math.PI / 2;
 
     let glow: THREE.Sprite | undefined;
     let glowMat: THREE.SpriteMaterial | undefined;
@@ -67,10 +73,9 @@ export class TelegrapherField {
       w.age += dt;
       const r = w.age * this.propSpeed;
       const frac = r / w.maxR;
-      // Shell: 1/(1+r²) fade, plus a ring-like envelope that peaks early and
-      // falls toward maxR
+      // Ring fades as it expands so the wavefront looks like it disperses
       const env  = Math.max(0, 1 - frac);
-      const opShell = 0.85 * w.amp * env / (1 + 1.6 * frac * frac);
+      const opShell = 0.55 * w.amp * env * env;
       w.shellMat.opacity = opShell;
       w.mesh.scale.setScalar(Math.max(1e-6, r));
 

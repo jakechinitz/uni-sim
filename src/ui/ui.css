@@ -281,6 +281,16 @@ html, body {
   border-color: rgba(122,215,255,0.9);
   box-shadow: 0 0 16px rgba(122,215,255,0.7);
 }
+#cursor.pickup {
+  border-color: rgba(255,200,120,0.95);
+  width: 28px; height: 28px;
+  box-shadow: 0 0 24px rgba(255,200,120,0.9);
+  animation: pickup-pulse 320ms ease-out;
+}
+@keyframes pickup-pulse {
+  0%   { transform: translate(-50%,-50%) scale(0.6); }
+  100% { transform: translate(-50%,-50%) scale(1.2); }
+}
 #cursor.dragging {
   border-color: rgba(255,255,255,0.95);
   width: 30px; height: 30px;
