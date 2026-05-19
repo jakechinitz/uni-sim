@@ -9,6 +9,8 @@ import { radialGlow } from '../render/Glow';
 import { Body, accelOnRAR, stepLeapfrog } from '../core/Gravity';
 import { hashStr } from '../util/hash';
 import { smoothstep, clamp01 } from '../util/lerp';
+import { a as scaleFactor } from '../core/Cosmology';
+import { ManyPasts } from '../render/ManyPasts';
 
 // N_GAL drives the dominant CPU cost: O(N²) per-pair RAR integration per
 // substep. 220 keeps the cosmic-web looking dense without choking the CPU.
@@ -44,6 +46,7 @@ export class CosmicRegime extends Regime {
   private focusReticle!: THREE.Sprite;
   private _nbodyTick = 0;
   private wallTime = 0;
+  private manyPasts = new ManyPasts(new THREE.Color(0x9b8dff), 3.5);
 
   constructor(aspect: number, seed: number) {
     super(aspect);
@@ -200,6 +203,7 @@ export class CosmicRegime extends Regime {
     }));
     this.focusReticle.visible = false;
     this.scene.add(this.focusReticle);
+    this.scene.add(this.manyPasts.group);
   }
 
   update(ctx: RegimeContext, dt: number): void {
@@ -222,8 +226,14 @@ export class CosmicRegime extends Regime {
     );
 
     // "Breath" — visible expansion from EDE pulse
+    // Hubble flow: galaxy positions scale with a(t). At t≈1 Gyr the universe
+    // was ~17 % its present size, at 4 Gyr ~43 %, at 13.8 Gyr exactly 1. The
+    // EDE pulse adds a small additional "breath" on top (paper §18). Both
+    // factors collapse into a single multiplier `cosmicScale` that drag
+    // handlers below also use to un-scale the released world point.
     const breath = 1 + 0.04 * ctx.edePulse;
-    this.edeBreath = breath;
+    const cosmicScale = scaleFactor(ctx.time) * breath;
+    this.edeBreath = cosmicScale;
 
     // Drive galaxy visibility
     const galsLit = clamp01((t - 0.05) / 1.5);
@@ -249,12 +259,12 @@ export class CosmicRegime extends Regime {
       const visDt = Math.min(0.06, Math.abs(dt)) * Math.sign(dt || 1);
       stepLeapfrog(bodies, visDt, (i, all) => accelOnRAR(i, all, G_SIM, A0_SIM));
     }
-    // Apply breath to positions (visual cosmic expansion at z~3000)
+    // Apply combined Hubble flow + EDE breath to positions
     for (const g of this.galaxies) {
       g.mesh.position.set(
-        g.body.pos[0] * breath,
-        g.body.pos[1] * breath,
-        g.body.pos[2] * breath
+        g.body.pos[0] * cosmicScale,
+        g.body.pos[1] * cosmicScale,
+        g.body.pos[2] * cosmicScale
       );
       g.halo!.position.copy(g.mesh.position);
     }
@@ -273,6 +283,20 @@ export class CosmicRegime extends Regime {
     this.filMaterial.opacity = filOpacity;
 
     this.haloGroup.visible = ctx.entanglementOn;
+
+    // Many-Pasts ghost cloud — haunts the brightest galaxies when rewinding
+    this.manyPasts.update(
+      this.galaxies
+        .filter(g => g.fadeIn > 0.3)
+        .slice(0, 30)               // cap to 30 brightest to keep it cheap
+        .map(g => ({
+          id: g.id,
+          pos: g.mesh.position,
+          scale: g.size * 1.8
+        })),
+      ctx.dtWall,
+      ctx.manyPastsOn
+    );
 
     // Camera is owned by OrbitControls — don't touch it here. The focus
     // reticle below highlights which galaxy the camera ray is currently on.

@@ -28,6 +28,7 @@ export function bindUI(cb: UICallbacks) {
   const togEnt      = el<HTMLInputElement>('toggle-entangle');
   const togBlm      = el<HTMLInputElement>('toggle-bloom');
   const togDisk     = el<HTMLInputElement>('toggle-disk');
+  const togMP       = el<HTMLInputElement>('toggle-manypasts');
 
   // Init from state. paintTransport / refreshPresetState rely on `chips`
   // being declared, so we set up the chip refs BEFORE the first repaint
@@ -54,6 +55,8 @@ export function bindUI(cb: UICallbacks) {
   // Backfill disk toggle for saves predating it (defensive: undefined → true)
   cb.state.toggles.disk = cb.state.toggles.disk ?? true;
   togDisk.checked   = cb.state.toggles.disk;
+  cb.state.toggles.manyPasts = cb.state.toggles.manyPasts ?? false;
+  togMP.checked     = cb.state.toggles.manyPasts;
   paintTransport();
 
   sliderTime.addEventListener('input', () => {
@@ -123,6 +126,10 @@ export function bindUI(cb: UICallbacks) {
   });
   togDisk.addEventListener('change', () => {
     cb.state.toggles.disk = togDisk.checked;
+    cb.onChange();
+  });
+  togMP.addEventListener('change', () => {
+    cb.state.toggles.manyPasts = togMP.checked;
     cb.onChange();
   });
 

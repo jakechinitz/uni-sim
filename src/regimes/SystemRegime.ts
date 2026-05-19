@@ -406,6 +406,14 @@ export class SystemRegime extends Regime {
     return 0.4;
   }
 
+  lensSources(): { worldPos: THREE.Vector3; radius: number }[] {
+    if (!this.remnant) return [];
+    const cam = this.camera.position;
+    const dist = this.remnant.position.distanceTo(cam) + 1e-3;
+    const ndcR = Math.min(0.18, 5 / dist);
+    return [{ worldPos: this.remnant.position, radius: ndcR }];
+  }
+
   pick(intersection: THREE.Intersection): DragTarget | null {
     const obj = intersection.object;
     const ud  = obj.userData;

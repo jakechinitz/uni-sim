@@ -247,6 +247,7 @@ export class App {
       edePulse: ede,
       entanglementOn: this.state.toggles.entangle,
       diskOn: this.state.toggles.disk ?? true,
+      manyPastsOn: (this.state.toggles.manyPasts ?? false) && this.clock.direction === -1 && this.clock.playing,
       dtWall,
       rate: this.clock.speed,
       focus: this.regimes.focus
@@ -256,6 +257,8 @@ export class App {
       this.controls.update();
       this.applySliderDistance();
     }
+    // Feed BH lens sources into the post-process for the current camera.
+    this.composer.setLensSources(this.regimes.current.camera, this.regimes.current.lensSources());
     this.regimes.render(dtWall);
 
     // HUD

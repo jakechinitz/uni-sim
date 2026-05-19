@@ -122,7 +122,7 @@ export class RegimeManager {
     this.composer.setScene(this.current.scene, this.current.camera);
     this.composer.setBloom(this.current.bloomStrength({
       seed: this.seed, time: 0, zoomIntra: 0, edePulse: 0,
-      entanglementOn: false, diskOn: true, dtWall: 0, rate: 0,
+      entanglementOn: false, diskOn: true, manyPastsOn: false, dtWall: 0, rate: 0,
       focus: this.focus
     }));
     this.composer.render(dt);
