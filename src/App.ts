@@ -340,8 +340,8 @@ export class App {
     const anchor = this.anchors.current;
     if (anchor) {
       anchor.update({ playing: this.clock.playing, wallDt: dtWall, simDt: dtSim });
-      // No lensing sources from anchors (they manage their own visuals).
-      this.composer.setLensSources(anchor.camera, []);
+      // Anchors that include BHs publish lens sources just like regimes.
+      this.composer.setLensSources(anchor.camera, anchor.lensSources());
       this.composer.setScene(anchor.scene, anchor.camera);
       this.composer.render(dtWall);
     } else {

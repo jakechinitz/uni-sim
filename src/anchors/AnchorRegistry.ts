@@ -8,6 +8,8 @@ import { Anchor, AnchorMeta } from './Anchor';
 import { SubstrateResponseAnchor } from './SubstrateResponse';
 import { BHFormationAnchor } from './BHFormation';
 import { RARTransitionAnchor } from './RARTransition';
+import { LensingAnchor } from './Lensing';
+import { HorizonInformationAnchor } from './HorizonInformation';
 
 export interface AnchorEntry {
   meta: AnchorMeta;
@@ -62,5 +64,35 @@ export const ANCHORS: AnchorEntry[] = [
       tier: 1
     },
     build: (aspect) => new RARTransitionAnchor(aspect)
+  },
+  {
+    meta: {
+      id: 'lensing-no-slip',
+      title: 'Lensing · no-slip consistency',
+      paperRef: '§15',
+      blurb:
+        'Paper §15: scalar entanglement sector has no anisotropic stress, ' +
+        'so Φ_lens = Ψ — the same effective potential that drives orbits ' +
+        'bends light. A single SMBH against a grid of background sources; ' +
+        'the screen-space lens pass deflects pixels around the BH at the ' +
+        'Schwarzschild apparent angular size.',
+      tier: 1
+    },
+    build: (aspect) => new LensingAnchor(aspect)
+  },
+  {
+    meta: {
+      id: 'horizon-information',
+      title: 'Horizon information · scramble + leak',
+      paperRef: '§20, App. B',
+      blurb:
+        'A structured payload falls into a BH. It gets stretched at the ' +
+        'photon ring, ingested into horizon channels (ln 2 per face), then ' +
+        'slowly leaks back out as Hawking emission in shuffled order. ' +
+        "Cartoon of the paper's information-preserving thermal-looking " +
+        'leakage.',
+      tier: 2
+    },
+    build: (aspect) => new HorizonInformationAnchor(aspect)
   }
 ];

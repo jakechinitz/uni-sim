@@ -52,6 +52,11 @@ export abstract class Anchor {
     this.camera.updateProjectionMatrix();
   }
 
+  // Optional gravitational-lensing sources for the Composer lens pass.
+  // Same contract as Regime.lensSources — return BH positions + NDC radii
+  // and the screen-space deflection shader will warp pixels around them.
+  lensSources(): { worldPos: THREE.Vector3; radius: number }[] { return []; }
+
   // Standard scene disposal. Override if you hold extra GPU resources.
   dispose() {
     this.scene.traverse((o) => {
