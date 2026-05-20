@@ -25,22 +25,24 @@ export interface Body {
 // Soft 1/r with Plummer-style softening to avoid singularities at close range.
 const SOFT2 = 1e-8;
 
-// Paper's RAR (Chinitz, eq. immediately after a₀ definition):
+// Paper's RAR (Chinitz, paper line 1107):
 //   g_obs = g_bar / (1 − exp(−√(g_bar/a₀)))
-// Same asymptotes as the simple-µ family — Newton when g_bar ≫ a₀,
-// deep-MOND √(a₀·g_bar) when g_bar ≪ a₀ — but a slightly sharper
-// crossover. This is the single form the paper actually derives, so
-// the live sim now uses it; the older simple-µ is kept (nuRAR_simple)
-// for reference / comparison.
+// With y = g_bar/a₀, the boost factor is therefore
+//   ν(y) := g_obs / g_bar = 1 / (1 − exp(−√y)).
+// Asymptotes:
+//   y → ∞ (Newton):     exp(−√y) → 0, ν → 1.
+//   y → 0  (deep-MOND): √y small, 1−exp(−√y) ≈ √y, so ν → 1/√y, which
+//                       gives g_obs = g_bar/√y = √(a₀·g_bar). ✓
+// The older simple-µ form is kept below for reference.
 export function nuRAR(y: number): number {
   if (y <= 0) return 1e15;
   const sy = Math.sqrt(y);
-  // Series-expand 1/(1 - exp(-sy)) for tiny sy to avoid 0/0:
-  //   1/(1 - exp(-x)) ≈ 1/x + 0.5 + x/12 - ...
-  // ν = g_obs/g_bar = (1/(1−exp(−sy))) / sy.  At sy → 0, ν → 1/(sy·sy) = 1/y.
-  if (sy < 1e-7) return 1 / Math.max(y, 1e-30);
+  // 1 − exp(−√y) underflows for very small √y; series expansion
+  //   1/(1 − exp(−x)) ≈ 1/x + 1/2 + x/12 − …
+  // tells us ν → 1/√y in that limit, so we substitute directly.
+  if (sy < 1e-7) return 1 / Math.max(sy, 1e-30);
   const denom = 1 - Math.exp(-sy);
-  return 1 / (sy * denom);
+  return 1 / denom;
 }
 
 // Older simple-µ family: ν(y) = 1/2 + √(1/4 + 1/y). Kept for diff /
