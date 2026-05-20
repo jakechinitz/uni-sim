@@ -495,24 +495,42 @@ export class GalaxyRegime extends Regime {
           if (!this.silentCatchup) {
             this.telegrapher.emit(keep.mesh.position.clone(), R_GAL * 1.6, 1.4);
           }
-          // Remove the absorbed BH from scene + draggable + bhs[]
-          this.scene.remove(gone.mesh);
-          this.draggable.remove(gone.mesh);
-          gone.mesh.traverse(o => {
-            const g = (o as any).geometry; if (g?.dispose) g.dispose();
-            const m = (o as any).material;
-            if (Array.isArray(m)) m.forEach((x: any) => x.dispose?.());
-            else m?.dispose?.();
-          });
-          this.bhs.splice(this.bhs.indexOf(gone), 1);
-          // Re-index userData so pick/hover still works
-          for (let k = 0; k < this.bhs.length; k++) this.bhs[k].mesh.userData.index = k;
+          this.disposeBH(gone);
           merged = true;
           break outer;
         }
       }
     }
     return merged;
+  }
+
+  // Remove a BHView from the scene + draggable group + bhs[], dispose
+  // its GPU resources, and re-index userData on the remaining BHs so
+  // pick/hover still resolve to the right index. Shared by the merger
+  // path and the scrub-back resurrection path below.
+  private disposeBH(bh: BHView) {
+    this.scene.remove(bh.mesh);
+    this.draggable.remove(bh.mesh);
+    bh.mesh.traverse(o => {
+      const g = (o as any).geometry; if (g?.dispose) g.dispose();
+      const m = (o as any).material;
+      if (Array.isArray(m)) m.forEach((x: any) => x.dispose?.());
+      else m?.dispose?.();
+    });
+    const idx = this.bhs.indexOf(bh);
+    if (idx >= 0) {
+      this.bhs.splice(idx, 1);
+      for (let k = 0; k < this.bhs.length; k++) this.bhs[k].mesh.userData.index = k;
+    }
+  }
+
+  // Find and dispose the stellar BH spawned from a given supernova
+  // progenitor. Called when cosmic time is scrubbed back across the
+  // star's death so the BH that "shouldn't exist yet" goes away too.
+  private removeStellarBHFor(star: Star) {
+    const targetId = `bh-sn-${star.body.id}`;
+    const bh = this.bhs.find(b => b.body.id === targetId);
+    if (bh) this.disposeBH(bh);
   }
 
   // Spawn an expanding-fading explosion sprite at the dying star's
@@ -768,6 +786,24 @@ export class GalaxyRegime extends Regime {
       arr[i * 3 + 2] = s.body.pos[2];
 
       const age = tG - s.birth;
+
+      // --- REVERSE state transitions ---
+      // If cosmic time has been scrubbed BACK past one of this star's
+      // state-change thresholds, revert. Without this, dead stars stay
+      // dead forever (and the white-dwarf cooling formula blows up with
+      // negative sinceDeath, rendering them as giant glowing blobs).
+      if (s.state === 'dead' && tG < s.deathT) {
+        s.state = (age >= s.lifetime * 0.97 && age < s.lifetime) ? 'giant' : 'main';
+        s.deathT = Infinity;
+        if (s.spawnedBH) {
+          this.removeStellarBHFor(s);
+          s.spawnedBH = false;
+        }
+      }
+      if (s.state === 'giant' && age < s.lifetime * 0.97) {
+        s.state = 'main';
+      }
+
       let r = s.baseColor.r, g = s.baseColor.g, b = s.baseColor.b;
       if (age < 0) {
         // Pre-ignition (unborn)
