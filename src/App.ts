@@ -7,13 +7,14 @@ import { RegimeManager } from './regimes/RegimeManager';
 import { Clock } from './core/Clock';
 import { z as cosmoZ, epoch as cosmoEpoch, edePulse } from './core/Cosmology';
 import { decodeZoom } from './core/Camera';
-import { bindUI, setHud, syncControls } from './ui/ui';
+import { bindUI, setHud, syncControls, updateAnchorPanel } from './ui/ui';
 import { bindClosurePanel } from './ui/Closure';
 import { updateHoverCard, pinHoverCard, unpinHoverCard } from './ui/HoverCard';
 import { SaveData, autosave, emptySave, loadLocal } from './core/Store';
 import { DragController } from './core/Drag';
 import { formatRate } from './util/units';
 import type { RegimeKey } from './core/Camera';
+import { AnchorManager } from './anchors/AnchorManager';
 
 // Camera-distance range per regime — wheel zooms within this range, then
 // the slider crosses a band boundary and the next regime mounts with the
@@ -37,6 +38,9 @@ export class App {
   private controls!: OrbitControls;
   private drag!: DragController;
   private canvas!: HTMLCanvasElement;
+  // Anchor scenes (paper-derived dynamics demos). When `current` is set
+  // we render the anchor scene instead of the regime view.
+  private anchors!: AnchorManager;
 
   constructor() {
     const canvas = document.getElementById('c') as HTMLCanvasElement;
@@ -75,6 +79,7 @@ export class App {
     this.composer = new Composer(this.renderer, dummyScene, dummyCam);
 
     this.regimes = new RegimeManager(this.renderer, this.composer, this.state.seed);
+    this.anchors = new AnchorManager(window.innerWidth / window.innerHeight);
 
     // DragController is registered FIRST so its pointerdown handler runs
     // before OrbitControls' — when it grabs an object it stopImmediatePropagation
@@ -153,6 +158,27 @@ export class App {
         this.composer.flash(1.0);
         this.prevTime = 1; // ensure bang flash next frame
         autosave(this.state);
+      },
+      // Anchor (dynamics-demo) wiring. Selecting a scene from the
+      // dropdown swaps the rendered scene for an isolated paper-derived
+      // demo; the regime view stays alive in the background but isn't
+      // drawn. Selecting "Live universe" returns to the regime flow.
+      anchors: {
+        list: this.anchors.list().map(e => ({
+          id: e.meta.id,
+          title: e.meta.title,
+          tier: e.meta.tier
+        })),
+        onSelect: (id) => {
+          this.anchors.setActive(id);
+          if (id === null || !this.anchors.current) {
+            updateAnchorPanel(null);
+          } else {
+            const m = this.anchors.current.meta;
+            updateAnchorPanel({ title: m.title, paperRef: m.paperRef, blurb: m.blurb });
+          }
+        },
+        onRestart: () => this.anchors.restart()
       }
     });
 
@@ -189,6 +215,7 @@ export class App {
     this.renderer.setSize(w, h, false);
     if (this.composer) this.composer.resize();
     if (this.regimes)  this.regimes.resize(w, h);
+    if (this.anchors)  this.anchors.resize(w, h);
   }
 
   // OrbitControls per regime — handles left-drag orbit + right-drag pan.
@@ -308,33 +335,46 @@ export class App {
     const slice = decodeZoom(this.state.zoom);
     this.state.regime = slice.regime;
 
-    // Continuously refresh focus from the current regime (so the next
-    // regime transition has the right child), then apply zoom — which
-    // commits focus + rebuilds if (regime, focus) changed.
-    this.regimes.pumpFocus();
-    this.regimes.setZoom(this.state.zoom);
+    // If an anchor scene is active, take the alternate render path —
+    // we skip the regime flow entirely and just step + render the anchor.
+    const anchor = this.anchors.current;
+    if (anchor) {
+      anchor.update({ playing: this.clock.playing, wallDt: dtWall, simDt: dtSim });
+      // No lensing sources from anchors (they manage their own visuals).
+      this.composer.setLensSources(anchor.camera, []);
+      this.composer.setScene(anchor.scene, anchor.camera);
+      this.composer.render(dtWall);
+    } else {
+      // Live-universe path.
 
-    this.regimes.update({
-      seed: this.state.seed,
-      time: tGyr,
-      zoomIntra: slice.intra,
-      edePulse: ede,
-      entanglementOn: this.state.toggles.entangle,
-      diskOn: this.state.toggles.disk ?? true,
-      diskDetailOn: this.state.toggles.diskDetail ?? true,
-      manyPastsOn: (this.state.toggles.manyPasts ?? false) && this.clock.direction === -1 && this.clock.playing,
-      dtWall,
-      rate: this.clock.speed,
-      focus: this.regimes.focus
-    }, dtSim);
+      // Continuously refresh focus from the current regime (so the next
+      // regime transition has the right child), then apply zoom — which
+      // commits focus + rebuilds if (regime, focus) changed.
+      this.regimes.pumpFocus();
+      this.regimes.setZoom(this.state.zoom);
 
-    if (this.controls) {
-      this.controls.update();
-      this.applySliderDistance();
+      this.regimes.update({
+        seed: this.state.seed,
+        time: tGyr,
+        zoomIntra: slice.intra,
+        edePulse: ede,
+        entanglementOn: this.state.toggles.entangle,
+        diskOn: this.state.toggles.disk ?? true,
+        diskDetailOn: this.state.toggles.diskDetail ?? true,
+        manyPastsOn: (this.state.toggles.manyPasts ?? false) && this.clock.direction === -1 && this.clock.playing,
+        dtWall,
+        rate: this.clock.speed,
+        focus: this.regimes.focus
+      }, dtSim);
+
+      if (this.controls) {
+        this.controls.update();
+        this.applySliderDistance();
+      }
+      // Feed BH lens sources into the post-process for the current camera.
+      this.composer.setLensSources(this.regimes.current.camera, this.regimes.current.lensSources());
+      this.regimes.render(dtWall);
     }
-    // Feed BH lens sources into the post-process for the current camera.
-    this.composer.setLensSources(this.regimes.current.camera, this.regimes.current.lensSources());
-    this.regimes.render(dtWall);
 
     // HUD
     const zR = cosmoZ(tGyr);
