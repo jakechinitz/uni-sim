@@ -10,6 +10,7 @@ import { BHFormationAnchor } from './BHFormation';
 import { RARTransitionAnchor } from './RARTransition';
 import { LensingAnchor } from './Lensing';
 import { HorizonInformationAnchor } from './HorizonInformation';
+import { CosmologicalActivationAnchor } from './CosmologicalActivation';
 
 export interface AnchorEntry {
   meta: AnchorMeta;
@@ -94,5 +95,21 @@ export const ANCHORS: AnchorEntry[] = [
       tier: 2
     },
     build: (aspect) => new HorizonInformationAnchor(aspect)
+  },
+  {
+    meta: {
+      id: 'cosmological-activation',
+      title: 'Cosmological activation · Hubble tension',
+      paperRef: '§18',
+      blurb:
+        'A 3D history rail of cosmic epochs. The trace-coupled scalar χ ' +
+        'is dormant during radiation (T^μ_μ = 0), spikes at matter-rad ' +
+        'equality (paper §18 EDE pulse), then dilutes through the dark ' +
+        'ages. A playhead sweeps cosmic time on a log scale; the χ curve ' +
+        "lights up exactly where the paper's Hubble-tension mechanism " +
+        'turns on.',
+      tier: 2
+    },
+    build: (aspect) => new CosmologicalActivationAnchor(aspect)
   }
 ];
