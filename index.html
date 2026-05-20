@@ -13,7 +13,8 @@
   <div id="hud-epoch">—</div>
 
   <div id="ui">
-    <div class="row">
+    <!-- Row 1: transport + time + zoom -->
+    <div class="row row-main">
       <div class="cluster">
         <button id="btn-rewind"  data-tip="Rewind time toward the Big Bang">⏪</button>
         <button id="btn-play"    data-tip="Play / pause the cosmic clock">▶</button>
@@ -25,60 +26,60 @@
         <div class="time-track">
           <input id="slider-time" type="range" min="0" max="1" step="0.0001" value="0" />
           <div class="time-epochs">
-            <!-- Epoch ticks. Positions computed from the scrubToTime
-                 inverse so they land at the right scrub value. -->
-            <!-- Positions computed from the exponential scrub→time map:
-                 t(s) = 13.8 * (e^(8s)-1)/(e^8-1). The early universe is
-                 compressed visually because we spend most slider real
-                 estate showing matter-domination through today. -->
-            <span class="ep" style="left:0%"     data-tip="Big Bang · t = 0 · the singularity">Big Bang</span>
-            <span class="ep" style="left:1%"     data-tip="EDE Pulse · z ≈ 3000 (~50 kyr after Big Bang) — paper §18 Hubble-tension mechanism fires here">EDE</span>
-            <span class="ep" style="left:39%"    data-tip="First stars + black holes form (~100 Myr)">First stars</span>
-            <span class="ep" style="left:67%"    data-tip="First galaxies condense (~1 Gyr)">Galaxies</span>
-            <span class="ep" style="left:84%"    data-tip="Cosmic-web filaments materialise (~4 Gyr)">Web</span>
-            <span class="ep" style="left:100%"   data-tip="Present day (13.8 Gyr) — past this point you're in the future">Today</span>
+            <!-- Epoch ticks. Even-index labels go ABOVE the slider track, odd-index
+                 BELOW, alternating to avoid horizontal collisions in the early
+                 universe (Big Bang + EDE are nearly co-located on the scrub map). -->
+            <span class="ep top" style="left:0%"     data-tip="Big Bang · t = 0 · the singularity">BB</span>
+            <span class="ep bot" style="left:3%"     data-tip="EDE Pulse · z ≈ 3000 (~50 kyr after Big Bang) — paper §18 Hubble-tension mechanism fires here">EDE</span>
+            <span class="ep top" style="left:39%"    data-tip="First stars + black holes form (~100 Myr)">1st stars</span>
+            <span class="ep bot" style="left:67%"    data-tip="First galaxies condense (~1 Gyr)">gal</span>
+            <span class="ep top" style="left:84%"    data-tip="Cosmic-web filaments materialise (~4 Gyr)">web</span>
+            <span class="ep bot" style="left:100%"   data-tip="Present day (13.8 Gyr) — past this point you're in the future">now</span>
           </div>
         </div>
         <span class="val" id="hud-time">t = 0 · z = ∞ · Big Bang</span>
-        <button id="btn-bigbang" class="pill-btn small" data-tip="Reset to the Big Bang and play forward at a slow pace so you can watch each epoch unfold">↺ Big Bang</button>
+        <button id="btn-bigbang" class="pill-btn small" data-tip="Reset to the Big Bang and play forward at a slow log-pace so each cosmic decade is visible">↺ BB</button>
       </label>
 
-      <label class="slider zoom-slider" data-tip="Pick the scale you're looking at. Bands: cosmic web → galaxy → solar system → tetrahedral substrate.">
+      <label class="slider zoom-slider" data-tip="Pick the scale you're looking at. Bands: cosmic web → galaxy → solar system → planet → atomic → substrate.">
         <span class="lbl">zoom</span>
         <div class="zoom-track">
           <input id="slider-zoom" type="range" min="0" max="1" step="0.0001" value="0.07" />
           <div class="zoom-bands">
-            <span style="left:0%;      width:16.66%">COSMIC</span>
-            <span style="left:16.66%;  width:16.66%">GALAXY</span>
-            <span style="left:33.33%;  width:16.66%">SYSTEM</span>
-            <span style="left:50%;     width:16.66%">PLANET</span>
-            <span style="left:66.66%;  width:16.66%">ATOMIC</span>
-            <span style="left:83.33%;  width:16.66%">SUBSTRATE</span>
+            <span style="left:0%;      width:16.66%" data-tip="Cosmic web — ~220 galaxies, filaments, EDE pulse">COS</span>
+            <span style="left:16.66%;  width:16.66%" data-tip="Galaxy — spiral disk, SMBH, 3,500 solar systems">GAL</span>
+            <span style="left:33.33%;  width:16.66%" data-tip="Solar system — star + 3–9 planets on Kepler orbits">SYS</span>
+            <span style="left:50%;     width:16.66%" data-tip="Planet — surface + atmosphere">PLN</span>
+            <span style="left:66.66%;  width:16.66%" data-tip="Atomic — schematic atoms + electron shells">ATM</span>
+            <span style="left:83.33%;  width:16.66%" data-tip="Substrate — 16³ telegrapher PDE, defects, q-field">SUB</span>
           </div>
         </div>
         <span class="val" id="hud-zoom">COSMIC ▸ 0.40</span>
       </label>
+    </div>
 
-      <label class="slider" data-tip="How fast cosmic time advances. Drag left for slow-mo, right for fast-forward.">
+    <!-- Row 2: speed slider with chips on its own line + toggles + actions -->
+    <div class="row row-sub">
+      <label class="slider speed-slider" data-tip="How fast cosmic time advances. Drag left for slow-mo, right for fast-forward.">
         <span class="lbl">speed</span>
         <input id="slider-speed" type="range" min="-18" max="18" step="0.05" value="16.5" />
         <span class="val" id="hud-speed">1.00 Gyr/s</span>
-        <div id="speed-presets" class="chips">
-          <button class="chip" data-exp="-15" data-tip="fs per real-second — slow enough that substrate ripples crawl">Quantum</button>
-          <button class="chip" data-exp="-2"  data-tip="10 ms per real-second — slow enough to watch photons cross a system">Light</button>
-          <button class="chip" data-exp="0"   data-tip="1× real time">Real</button>
-          <button class="chip" data-exp="4.94" data-tip="One Earth-day per real-second (watch a planet rotate)">Day/s</button>
-          <button class="chip" data-exp="7.5"  data-tip="One year per real-second (watch planetary orbits)">Year/s</button>
-          <button class="chip" data-exp="13.5" data-tip="One million years per real-second (watch a galaxy rotate)">Myr/s</button>
-          <button class="chip" data-exp="16.5" data-tip="One billion years per real-second (watch the universe evolve)">Gyr/s</button>
-        </div>
       </label>
+      <div id="speed-presets" class="chips">
+        <button class="chip" data-exp="-15" data-tip="fs per real-second — slow enough that substrate ripples crawl">Quantum</button>
+        <button class="chip" data-exp="-2"  data-tip="10 ms per real-second — slow enough to watch photons cross a system">Light</button>
+        <button class="chip" data-exp="0"   data-tip="1× real time">Real</button>
+        <button class="chip" data-exp="4.94" data-tip="One Earth-day per real-second (watch a planet rotate)">Day/s</button>
+        <button class="chip" data-exp="7.5"  data-tip="One year per real-second (watch planetary orbits)">Year/s</button>
+        <button class="chip" data-exp="13.5" data-tip="One million years per real-second (watch a galaxy rotate)">Myr/s</button>
+        <button class="chip" data-exp="16.5" data-tip="One billion years per real-second (watch the universe evolve)">Gyr/s</button>
+      </div>
 
       <div class="cluster">
-        <label class="pill" data-tip="Show the entanglement-substrate field around masses. Field lines follow whatever you're dragging."><input id="toggle-entangle" type="checkbox" /><span>entanglement</span></label>
-        <label class="pill" data-tip="Cinematic glow on bright objects. Looks gorgeous but can wash out the screen at galaxy scale."><input id="toggle-bloom" type="checkbox" checked /><span>bloom</span></label>
+        <label class="pill" data-tip="Show the entanglement-substrate field around masses. Each body carries its own halo; dragging moves it."><input id="toggle-entangle" type="checkbox" /><span>entanglement</span></label>
+        <label class="pill" data-tip="Post-process glow: bright pixels (star cores, BH disk, supernovae) bloom outward for a cinematic look. Turn off for sharp / clinical."><input id="toggle-bloom" type="checkbox" checked /><span>bloom</span></label>
         <label class="pill" data-tip="Show the spiral disk overlay in galaxy view. Turn off to see just the stars + BHs."><input id="toggle-disk" type="checkbox" checked /><span>disk</span></label>
-        <label class="pill" data-tip="Many-Pasts (paper §21). When rewinding time, faint ghost trajectories show alternate histories consistent with the present — operational reduction made visible. Only visible when ⏪ rewinding."><input id="toggle-manypasts" type="checkbox" /><span>many-pasts</span></label>
+        <label class="pill" data-tip="Many-Pasts (paper §21). When rewinding, faint ghost trajectories show alternate histories consistent with the present."><input id="toggle-manypasts" type="checkbox" /><span>many-pasts</span></label>
         <button id="btn-closure" class="pill-btn" data-tip="Show the live derivation chain that takes 1,680 tetrahedral microstates to Newton's G">closure</button>
       </div>
 

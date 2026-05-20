@@ -55,6 +55,17 @@ html, body {
   display: flex; flex-wrap: wrap; align-items: center;
   gap: 14px;
 }
+#ui .row.row-sub { margin-top: 10px; }
+#ui label.slider.speed-slider {
+  flex: 0 1 360px; min-width: 240px;
+}
+#ui label.slider.speed-slider .val { min-width: 90px; }
+/* Speed-preset chips live on their own row now so they never wrap
+   vertically inside the speed-slider container. */
+#speed-presets.chips {
+  margin-left: 0;
+  flex: 1 1 auto;
+}
 
 #ui .cluster { display: flex; gap: 6px; align-items: center; }
 
@@ -324,29 +335,34 @@ html, body {
   gap: 2px;
 }
 /* Cosmic-epoch tick labels under the time slider. Each .ep is positioned
-   along the track at the scrub value matching its epoch. */
+   along the track at the scrub value matching its epoch. Even-indexed
+   labels (.top) sit above the slider, odd-indexed (.bot) below, so
+   neighbouring labels don't collide horizontally. */
 .time-epochs {
   position: relative;
-  height: 14px;
+  height: 22px;
   font-size: 8.5px;
   color: rgba(255,255,255,0.32);
   letter-spacing: 0.04em;
 }
 .time-epochs .ep {
   position: absolute;
-  top: 0;
   transform: translateX(-50%);
   cursor: help;
   user-select: none;
   white-space: nowrap;
 }
+.time-epochs .ep.top { top: 0; }
+.time-epochs .ep.bot { bottom: 0; }
 .time-epochs .ep::before {
   content: '';
   position: absolute;
-  top: -4px; left: 50%;
-  width: 1px; height: 4px;
+  left: 50%;
+  width: 1px;
   background: rgba(255,255,255,0.32);
 }
+.time-epochs .ep.top::before { top: 100%; height: 3px; }
+.time-epochs .ep.bot::before { bottom: 100%; height: 3px; }
 .time-epochs .ep:hover {
   color: var(--accent);
 }
@@ -365,13 +381,17 @@ html, body {
   height: 12px;
   font-size: 8.5px;
   color: rgba(255,255,255,0.32);
-  letter-spacing: 0.10em;
+  letter-spacing: 0.08em;
 }
 .zoom-bands span {
   position: absolute; top: 0;
   text-align: center;
   user-select: none;
+  cursor: help;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
+.zoom-bands span:hover { color: var(--accent); }
 .zoom-bands span::before {
   content: ''; position: absolute;
   top: -3px; left: 0; right: 0;
