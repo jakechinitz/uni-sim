@@ -425,6 +425,106 @@ html, body {
   border-top: 1px solid rgba(255,255,255,0.08);
 }
 
+/* Scene picker dropdown — sits in the bottom HUD next to closure/save.
+   Styled to match the .pill-btn family so it doesn't visually fight
+   the rest of the row. */
+.select-wrap {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 0 4px 0 10px;
+  height: 28px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: rgba(255,255,255,0.02);
+  color: var(--dim);
+  cursor: pointer;
+  transition: color 120ms ease, border-color 120ms ease, background 120ms ease;
+}
+.select-wrap:hover { color: var(--accent); border-color: rgba(122,215,255,0.35); }
+.select-wrap .select-label {
+  font-size: 10px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--dim);
+}
+.select-wrap select {
+  appearance: none; -webkit-appearance: none;
+  background: transparent;
+  border: none;
+  color: rgba(255,255,255,0.92);
+  font-family: var(--font);
+  font-size: 11.5px;
+  padding: 0 22px 0 4px;
+  height: 26px;
+  cursor: pointer;
+  outline: none;
+  /* Custom chevron */
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'><path d='M1 1l4 4 4-4' stroke='%237ad7ff' stroke-width='1.4' fill='none' stroke-linecap='round'/></svg>");
+  background-repeat: no-repeat;
+  background-position: right 6px center;
+}
+.select-wrap select option { background: #0a0c14; color: #e8eef6; }
+
+/* Anchor info panel — pinned top-right while an anchor is active. */
+#anchor-panel {
+  position: fixed;
+  top: 56px; right: 16px;
+  width: 280px;
+  padding: 12px 14px 10px;
+  background: var(--panel);
+  backdrop-filter: blur(12px) saturate(130%);
+  -webkit-backdrop-filter: blur(12px) saturate(130%);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  font-size: 11px;
+  color: rgba(255,255,255,0.88);
+  letter-spacing: 0.02em;
+  z-index: 14;
+  box-shadow: 0 8px 28px rgba(0,0,0,0.5);
+}
+#anchor-panel.hidden { display: none; }
+.ap-head {
+  display: flex; justify-content: space-between; align-items: baseline;
+  gap: 10px;
+  margin-bottom: 6px;
+  border-bottom: 1px solid var(--line);
+  padding-bottom: 6px;
+}
+.ap-title {
+  font-size: 11.5px;
+  letter-spacing: 0.10em;
+  text-transform: uppercase;
+  color: var(--accent);
+}
+.ap-ref {
+  font-size: 10px;
+  color: var(--dim);
+  font-feature-settings: "tnum";
+  white-space: nowrap;
+}
+.ap-blurb {
+  color: rgba(255,255,255,0.78);
+  line-height: 1.5;
+  font-size: 11px;
+  margin-bottom: 10px;
+}
+.ap-actions {
+  display: flex; gap: 6px;
+}
+.ap-btn {
+  flex: 1;
+  height: 26px;
+  background: rgba(255,255,255,0.04);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  color: var(--dim);
+  font-family: var(--font);
+  font-size: 10.5px;
+  letter-spacing: 0.05em;
+  cursor: pointer;
+  transition: color 120ms ease, border-color 120ms ease, background 120ms ease;
+}
+.ap-btn:hover { color: var(--accent); border-color: rgba(122,215,255,0.4); background: rgba(122,215,255,0.10); }
+
 #substrate-panel {
   position: fixed;
   top: 56px; right: 16px;

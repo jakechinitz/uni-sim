@@ -8,6 +8,14 @@ export interface UICallbacks {
   onChange: () => void;
   onLoad: (data: SaveData) => void;
   onNewSeed: () => void;
+  // Optional anchor-related hooks. If supplied, the scene-picker dropdown
+  // is populated and wired; the anchor info panel is shown/hidden via
+  // updateAnchorPanel below.
+  anchors?: {
+    list: { id: string; title: string; tier?: number }[];
+    onSelect: (id: string | null) => void;
+    onRestart: () => void;
+  };
 }
 
 function el<T extends HTMLElement>(id: string): T {
@@ -140,6 +148,38 @@ export function bindUI(cb: UICallbacks) {
     cb.onChange();
   });
 
+  // Scene picker — populated from the anchor registry. Selecting an
+  // anchor swaps the rendered scene; selecting "" (Live universe)
+  // returns to the regime view. The actual scene swap happens via the
+  // App's anchor callback; here we just wire up the dropdown + the
+  // "restart" / "back to live" buttons in the side panel.
+  const anchorSelect  = document.getElementById('anchor-select')      as HTMLSelectElement | null;
+  const anchorRestart = document.getElementById('btn-anchor-restart') as HTMLButtonElement | null;
+  const anchorExit    = document.getElementById('btn-anchor-exit')    as HTMLButtonElement | null;
+  if (anchorSelect && cb.anchors) {
+    // Build options. The default "" (Live universe) is already in the HTML.
+    // Anchors are appended in their registry order.
+    for (const entry of cb.anchors.list) {
+      const opt = document.createElement('option');
+      opt.value = entry.id;
+      opt.textContent = entry.title;
+      anchorSelect.appendChild(opt);
+    }
+    anchorSelect.addEventListener('change', () => {
+      const v = anchorSelect.value;
+      cb.anchors!.onSelect(v === '' ? null : v);
+    });
+  }
+  if (anchorRestart && cb.anchors) {
+    anchorRestart.addEventListener('click', () => cb.anchors!.onRestart());
+  }
+  if (anchorExit && cb.anchors && anchorSelect) {
+    anchorExit.addEventListener('click', () => {
+      anchorSelect.value = '';
+      cb.anchors!.onSelect(null);
+    });
+  }
+
   // ↺ Big Bang — reset cosmic time to 0 and engage log-pace playback
   // so the early universe (inflation flash → recombination → first
   // stars → galaxies) takes ~35 wall-sec to traverse. Each cosmic
@@ -166,6 +206,23 @@ export function setHud(parts: { time: string; zoom: string; speed: string; epoch
   (el<HTMLSpanElement>('hud-zoom')).textContent  = parts.zoom;
   (el<HTMLSpanElement>('hud-speed')).textContent = parts.speed;
   (el<HTMLDivElement>('hud-epoch')).textContent  = parts.epoch;
+}
+
+// Show / hide / populate the anchor info panel. Called by App whenever
+// the active anchor changes. Pass `null` to hide.
+export function updateAnchorPanel(
+  info: { title: string; paperRef: string; blurb: string } | null
+) {
+  const panel = document.getElementById('anchor-panel');
+  if (!panel) return;
+  if (!info) { panel.classList.add('hidden'); return; }
+  const t = document.getElementById('anchor-title');
+  const r = document.getElementById('anchor-ref');
+  const b = document.getElementById('anchor-blurb');
+  if (t) t.textContent = info.title;
+  if (r) r.textContent = info.paperRef;
+  if (b) b.textContent = info.blurb;
+  panel.classList.remove('hidden');
 }
 
 export function syncControls(state: SaveData) {
