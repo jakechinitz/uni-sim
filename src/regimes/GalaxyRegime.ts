@@ -588,6 +588,16 @@ export class GalaxyRegime extends Regime {
   // emit a telegrapher ringdown, push a new stellar BH (a few M☉) into the
   // dynamics. The new BH then orbits / merges with other BHs naturally.
   private spawnStellarBHFromSupernova(s: Star) {
+    // Catch-up suppression: a freshly mounted galaxy at present-day cosmic
+    // time would otherwise spawn one stellar BH for *every* historic
+    // supernova (≈ 0.5% of 3,500 stars ≈ 18 extras) in a single frame on
+    // top of the constructor's 2–7 initial BHs. Those tend to land close
+    // enough to one another (or to the SMBH's merger reach) that mergers
+    // cascade immediately. We mark spawnedBH=true so the forward state
+    // machine doesn't double-spawn if we later cross this star's death;
+    // the actual BH mesh is only created in normal forward play.
+    if (this.silentCatchup) return;
+
     // Remnant mass ≈ 30 % of initial (rest blown off in the explosion)
     const remMsun  = Math.max(3, s.mass * 0.30);
     const simMass  = 3 + (remMsun - 3) * 0.5;       // sim-mass scale
