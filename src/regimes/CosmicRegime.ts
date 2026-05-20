@@ -205,8 +205,13 @@ export class CosmicRegime extends Regime {
     this.filPositions = new Float32Array(pairs.length * 6);
     this.filGeom = new THREE.BufferGeometry();
     this.filGeom.setAttribute('position', new THREE.BufferAttribute(this.filPositions, 3).setUsage(THREE.DynamicDrawUsage));
+    // Filaments = capacity-gradient bridges between matter concentrations
+    // (paper §11–§12: gravity = relaxation of the substrate around defects,
+    // and that gradient propagates between mass-concentrations). Brighter +
+    // warmer tint than before so they actually read as "the substrate
+    // pulling galaxies together" rather than as graph edges.
     this.filMaterial = new THREE.LineBasicMaterial({
-      color: 0x6090c0, transparent: true, opacity: 0.0,
+      color: 0x9ac8ff, transparent: true, opacity: 0.0,
       blending: THREE.AdditiveBlending, depthWrite: false
     });
     this.filaments = new THREE.LineSegments(this.filGeom, this.filMaterial);
@@ -240,21 +245,59 @@ export class CosmicRegime extends Regime {
     if (this.prevCosmicT > 1e-3 && t < 1e-6) this.wallSinceBang = 0;
     this.prevCosmicT = t;
     this.wallSinceBang += ctx.dtWall;
-    // Sharper "fog-clears" recombination drop: stays bright through the
-    // plasma era, then steeply falls within ±10 % of t_recomb as the
-    // universe goes transparent.
-    const radIntensity =
-      t < 1e-9              ? 1.0 :
-      t < recomb * 0.9      ? 1.0 - 0.5 * smoothstep(0, recomb * 0.9, t) :
-      t < recomb * 1.1      ? 0.5 * (1 - smoothstep(recomb * 0.9, recomb * 1.1, t)) :
-                              Math.max(0, 0.03 * (1 - smoothstep(recomb * 1.1, 0.01, t)));
+    // Radiation/substrate field intensity. The paper (§18) says the
+    // homogeneous substrate mode is active everywhere — dormant during
+    // radiation domination, then carrying capacity inhomogeneities
+    // afterwards. Visually:
+    //   t < recomb*0.9  → bright plasma era (universe is opaque)
+    //   t ≈ recomb      → "fog clears" transition
+    //   recomb < t < 0.15 Gyr → DARK AGES — but not pitch black; keep a
+    //                  faint baseline (~10%) so the substrate still reads
+    //                  as a real thing covering everything between galaxies
+    //   t ≈ 0.15 Gyr   → REIONIZATION brightening (first stars light up
+    //                  intergalactic hydrogen)
+    //   t > 1 Gyr       → settle to a dim long-term floor (~6 %) — the
+    //                  substrate is everywhere but most capacity-action is
+    //                  now concentrated in galaxies (handled by filaments)
+    const REIO     = 0.15;     // Gyr — first-stars reionization epoch
+    let radIntensity: number;
+    if (t < 1e-9) {
+      radIntensity = 1.0;
+    } else if (t < recomb * 0.9) {
+      radIntensity = 1.0 - 0.5 * smoothstep(0, recomb * 0.9, t);
+    } else if (t < recomb * 1.1) {
+      // "Fog clears" transition — from 0.5 down to the dark-ages floor (0.10)
+      radIntensity = 0.5 - 0.40 * smoothstep(recomb * 0.9, recomb * 1.1, t);
+    } else if (t < REIO) {
+      // Dark ages baseline + small brightening as we approach reionization
+      const x = smoothstep(recomb * 1.1, REIO, t);
+      radIntensity = 0.10 + 0.05 * x;
+    } else if (t < 0.8) {
+      // Reionization era — gentle brightening peak as first stars+galaxies form
+      const x = smoothstep(REIO, 0.4, t);
+      const fade = 1 - smoothstep(0.4, 0.8, t);
+      radIntensity = 0.15 + 0.10 * x * fade;
+    } else {
+      // Long-term substrate floor: faint, ever-present capacity haze
+      radIntensity = 0.06;
+    }
     const radMat = this.radNoiseMesh.material as THREE.ShaderMaterial;
     radMat.uniforms.intensity.value = radIntensity * (1 + 0.6 * ctx.edePulse);
     // Radiation noise is pure visual ambiance — wall time, never freezes
     radMat.uniforms.time.value += ctx.dtWall;
-    radMat.uniforms.tint.value.setRGB(
-      1.0, 0.55 + 0.15 * ctx.edePulse, 0.30 + 0.20 * ctx.edePulse
-    );
+    // Tint warm in the plasma era, shifts cooler through dark ages →
+    // substrate background reads as "field" not "fire" once recombination
+    // is over. EDE pulse re-warms it transiently.
+    if (t < recomb * 1.1) {
+      radMat.uniforms.tint.value.setRGB(
+        1.0, 0.55 + 0.15 * ctx.edePulse, 0.30 + 0.20 * ctx.edePulse
+      );
+    } else {
+      // Cool substrate haze: dim blue-grey
+      radMat.uniforms.tint.value.setRGB(
+        0.55 + 0.45 * ctx.edePulse, 0.62 + 0.20 * ctx.edePulse, 0.78
+      );
+    }
     // Inflation factor: starts huge after Big Bang, decays to 1 over ~1 sec
     radMat.uniforms.inflate.value = 1 + 60 * Math.exp(-this.wallSinceBang * 3.5);
 
@@ -312,7 +355,13 @@ export class CosmicRegime extends Regime {
       this.filPositions[pi++] = gb.x; this.filPositions[pi++] = gb.y; this.filPositions[pi++] = gb.z;
     }
     (this.filGeom.attributes.position as THREE.BufferAttribute).needsUpdate = true;
-    const filOpacity = 0.45 * clamp01((t - 2.0) / 2.5);
+    // Filaments brighten earlier and stronger than before — they're the
+    // substrate's capacity-gradient bridges between galaxies, paper §11–12.
+    // Start coming in around the first-galaxies epoch (~1 Gyr) and reach
+    // full strength around 4 Gyr, then hold steady. Small wall-time
+    // breathing so they read as alive, not a static graph.
+    const filOpacity = 0.85 * clamp01((t - 1.0) / 3.0)
+                            * (0.82 + 0.18 * Math.sin(this.wallTime * 0.6));
     this.filMaterial.opacity = filOpacity;
 
     this.haloGroup.visible = ctx.entanglementOn;
