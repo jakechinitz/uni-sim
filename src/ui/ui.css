@@ -334,6 +334,15 @@ html, body {
   display: flex; flex-direction: column;
   gap: 2px;
 }
+/* When the clock is paused, dim the entire time-slider control so it
+   reads "scrubbing here only redraws visuals, no physics advance".
+   The slider stays interactive — it's a visual cue, not a disable. */
+.time-slider.paused { opacity: 0.55; }
+.time-slider.paused .lbl::after {
+  content: ' · paused';
+  color: var(--warm);
+  letter-spacing: 0.04em;
+}
 /* Cosmic-epoch tick labels under the time slider. Each .ep is positioned
    along the track at the scrub value matching its epoch. Even-indexed
    labels (.top) sit above the slider, odd-indexed (.bot) below, so
