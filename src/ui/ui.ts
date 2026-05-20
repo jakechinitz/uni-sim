@@ -26,7 +26,6 @@ export function bindUI(cb: UICallbacks) {
   const inpLoad     = el<HTMLInputElement>('input-load');
   const btnNew      = el<HTMLButtonElement>('btn-newseed');
   const togEnt      = el<HTMLInputElement>('toggle-entangle');
-  const togBlm      = el<HTMLInputElement>('toggle-bloom');
   const togDisk     = el<HTMLInputElement>('toggle-disk');
   const togMP       = el<HTMLInputElement>('toggle-manypasts');
 
@@ -51,7 +50,6 @@ export function bindUI(cb: UICallbacks) {
   sliderZoom.value  = String(cb.state.zoom);
   sliderSpeed.value = String(cb.state.speedExp);
   togEnt.checked    = cb.state.toggles.entangle;
-  togBlm.checked    = cb.state.toggles.bloom;
   // Backfill disk toggle for saves predating it (defensive: undefined → true)
   cb.state.toggles.disk = cb.state.toggles.disk ?? true;
   togDisk.checked   = cb.state.toggles.disk;
@@ -126,10 +124,6 @@ export function bindUI(cb: UICallbacks) {
     cb.state.toggles.entangle = togEnt.checked;
     cb.onChange();
   });
-  togBlm.addEventListener('change', () => {
-    cb.state.toggles.bloom = togBlm.checked;
-    cb.onChange();
-  });
   togDisk.addEventListener('change', () => {
     cb.state.toggles.disk = togDisk.checked;
     cb.onChange();
@@ -172,7 +166,6 @@ export function syncControls(state: SaveData) {
   (el<HTMLInputElement>('slider-zoom')).value  = String(state.zoom);
   (el<HTMLInputElement>('slider-speed')).value = String(state.speedExp);
   (el<HTMLInputElement>('toggle-entangle')).checked = state.toggles.entangle;
-  (el<HTMLInputElement>('toggle-bloom')).checked    = state.toggles.bloom;
   (el<HTMLInputElement>('toggle-disk')).checked     = state.toggles.disk ?? true;
   (el<HTMLButtonElement>('btn-play')).textContent = state.playing ? '⏸' : '▶';
   (el<HTMLButtonElement>('btn-rewind')).classList.toggle('on',  state.direction === -1 && state.playing);
