@@ -14,9 +14,14 @@ import { hawkingSolar, scrambling, formatSI } from '../core/Closure';
 import { M_SUN } from '../util/units';
 import { imfSample, mainSeqLifetime, SUPERNOVA_MASS } from '../core/StellarLifecycle';
 
-// 3500 stars is plenty visually; previous 6000 doubled the per-frame
-// star integration cost without noticeable visual gain.
-const N_STARS = 3500;
+// 12,000 stars across an 18-unit disk gives a real "spiral-galaxy
+// brightness wash" rather than a sparse star-cluster look. Each point
+// still represents ~10⁷ real solar systems (Milky Way has ~3×10¹¹ stars),
+// but visually the disk reads as continuous luminance with the spiral
+// arm density bunching emerging from the placement function. Per-frame
+// cost stays cheap: 12,000 × ~5 BHs = 60k ops for the RAR integration,
+// plus 36k floats for the position/color buffer update.
+const N_STARS = 12000;
 const R_GAL   = 18;
 const G_SIM   = 0.0008;
 const A0_SIM  = 0.00010;
@@ -402,11 +407,12 @@ export class GalaxyRegime extends Regime {
     this.starGeom.setAttribute('color', this.colAttr);
 
     this.starMaterial = new THREE.PointsMaterial({
-      // Each point is a whole solar system. Bumped to 0.15 so individual
-      // stars register against the SMBH's bulk and the spiral disk; with
-      // additive blending and ACES tonemap they still composite cleanly
-      // into a continuous disk at zoom-out.
-      size: 0.15, sizeAttenuation: true,
+      // Each point is a whole solar system. Size dropped to 0.12 to
+      // pair with the 12,000-star count — denser disk, individual
+      // points stay crisp instead of merging into chunky pixels.
+      // Additive blending + ACES tonemap still composite into a
+      // continuous bright wash at zoom-out.
+      size: 0.12, sizeAttenuation: true,
       vertexColors: true,
       transparent: true, depthWrite: false, opacity: 1.0,
       blending: THREE.AdditiveBlending,
