@@ -271,12 +271,17 @@ export class App {
     this.state.direction = this.clock.direction;
     this.state.playing   = this.clock.playing;
     this.state.logPace   = this.clock.useLogPace;
-    // Push log-pace-advanced scrub back to the slider so the user sees
-    // the play head moving through the time epochs.
-    if (this.clock.useLogPace) {
-      const sl = document.getElementById('slider-time') as HTMLInputElement | null;
-      if (sl) sl.value = String(this.state.scrub);
-    }
+    // Push the play head back into the slider every frame so the
+    // user can SEE time advancing across the epoch ticks. Without
+    // this, the only feedback playback gives is the HUD readout
+    // updating — the slider thumb stays put and the time slider
+    // looks dead.
+    const sliderTimeEl = document.getElementById('slider-time') as HTMLInputElement | null;
+    if (sliderTimeEl) sliderTimeEl.value = String(this.state.scrub);
+    // Dim the time slider when paused so the user has a visible cue
+    // that scrubbing now only ticks visuals (no physics advance).
+    const timeLabel = document.querySelector('.time-slider') as HTMLLabelElement | null;
+    if (timeLabel) timeLabel.classList.toggle('paused', !this.clock.playing);
 
     const tGyr = this.clock.time;
     // Big-bang flash whenever we arrive at t≈0 from elsewhere

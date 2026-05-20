@@ -75,7 +75,6 @@ export class GalaxyRegime extends Regime {
   private bhs: BHView[] = [];
   private spiralMesh: THREE.Mesh;
   private spiralMat: THREE.ShaderMaterial;
-  private haloStars!: THREE.Points;
   private haloMesh: THREE.Sprite;
   private fieldLines: THREE.LineSegments;
   private flMaterial: THREE.LineBasicMaterial;
@@ -302,38 +301,6 @@ export class GalaxyRegime extends Regime {
     this.spiralMesh.rotation.x = -Math.PI / 2;
     this.scene.add(this.spiralMesh);
 
-    // Spherical halo of population-II stars — old, redder, scattered above
-    // and below the disk plane. Real spirals have a dim spheroidal halo
-    // visible against the dark sky; without it the galaxy looks like a
-    // sharp disc with nothing around it.
-    const HALO_STARS = 1200;
-    const haloPositions = new Float32Array(HALO_STARS * 3);
-    const haloColors    = new Float32Array(HALO_STARS * 3);
-    for (let i = 0; i < HALO_STARS; i++) {
-      // Power-law radial distribution, slightly flattened along disk plane
-      const rr = R_GAL * (0.4 + Math.pow(rng(), 1.5) * 1.4);
-      const u = rng() * 2 - 1;
-      const theta = rng() * Math.PI * 2;
-      const sR = Math.sqrt(1 - u * u);
-      haloPositions[i*3+0] = rr * sR * Math.cos(theta);
-      haloPositions[i*3+1] = rr * u * 0.55;            // flattened
-      haloPositions[i*3+2] = rr * sR * Math.sin(theta);
-      // Reddened pop-II colours — old metal-poor stars
-      const c = new THREE.Color().setHSL(0.06 + rng() * 0.04, 0.55, 0.5 + rng() * 0.18);
-      haloColors[i*3+0] = c.r; haloColors[i*3+1] = c.g; haloColors[i*3+2] = c.b;
-    }
-    const haloGeom = new THREE.BufferGeometry();
-    haloGeom.setAttribute('position', new THREE.BufferAttribute(haloPositions, 3));
-    haloGeom.setAttribute('color',    new THREE.BufferAttribute(haloColors, 3));
-    const haloStarsMat = new THREE.PointsMaterial({
-      size: 0.09, sizeAttenuation: true,
-      vertexColors: true, transparent: true,
-      depthWrite: false, opacity: 0.7,
-      blending: THREE.AdditiveBlending,
-      map: radialGlow(64, '#ffffff', '#ffd0a0', 'rgba(0,0,0,0)')
-    });
-    this.haloStars = new THREE.Points(haloGeom, haloStarsMat);
-    this.scene.add(this.haloStars);
 
     // Stars — points with per-vertex color
     this.starGeom = new THREE.BufferGeometry();
@@ -491,12 +458,14 @@ export class GalaxyRegime extends Regime {
 
   // Total mass at galactic centre — drives initial circular speeds for star
   // placement. Stellar-mass BHs are negligible vs. the SMBH at this scale.
-  // Coalesce close BH pairs. Sim Schwarzschild radius scales as mass;
-  // when two BHs are within (rs1 + rs2) × buffer, the smaller is absorbed
-  // by the heavier and a telegrapher front rings out from the merger.
+  // Coalesce close BH pairs. Previously we used rs ∝ M which made the
+  // SMBH's effective merger radius huge (~28 sim units for a 2,000-mass
+  // SMBH) and ate every stellar BH that wandered into the inner disk.
+  // Switched to rs ∝ √M so each BH's merger reach is proportional to its
+  // visual radius, not its raw mass. Two BHs merge when their summed
+  // reach exceeds the centre-to-centre distance.
   private mergeBHs() {
-    const RS_SCALE = 0.0035;   // sim units per unit mass (visual choice)
-    const BUFFER   = 4.0;      // merger triggers at a generous multiple
+    const RS_SCALE = 0.04;     // sim units per √(mass)
     let merged = false;
     outer:
     for (let i = 0; i < this.bhs.length; i++) {
@@ -506,7 +475,7 @@ export class GalaxyRegime extends Regime {
         const dy = a.body.pos[1] - b.body.pos[1];
         const dz = a.body.pos[2] - b.body.pos[2];
         const d2 = dx * dx + dy * dy + dz * dz;
-        const rs = (RS_SCALE * (a.mass + b.mass)) * BUFFER;
+        const rs = RS_SCALE * (Math.sqrt(a.mass) + Math.sqrt(b.mass));
         if (d2 < rs * rs) {
           // Heavier survives; lighter gets absorbed. Momentum conserved.
           const keep = a.mass >= b.mass ? a : b;
@@ -696,9 +665,6 @@ export class GalaxyRegime extends Regime {
     // Disk toggle — when off, just the stars + BHs are visible (much more
     // legible from below the galactic plane).
     this.spiralMesh.visible = ctx.diskOn && galaxyAlpha > 0.01;
-    // Halo stars fade in with the disk
-    this.haloStars.visible = ctx.diskOn && galaxyAlpha > 0.01;
-    (this.haloStars.material as THREE.PointsMaterial).opacity = 0.55 * galaxyAlpha;
     for (const b of this.bhs) b.mesh.tick(this.time);
 
     // BH-BH gravity (stellar BHs orbit the central SMBH and feel each
