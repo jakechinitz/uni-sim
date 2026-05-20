@@ -11,6 +11,8 @@ import { RARTransitionAnchor } from './RARTransition';
 import { LensingAnchor } from './Lensing';
 import { HorizonInformationAnchor } from './HorizonInformation';
 import { CosmologicalActivationAnchor } from './CosmologicalActivation';
+import { TelegrapherWavepacketAnchor } from './TelegrapherWavepacket';
+import { BHMergerAnchor } from './BHMerger';
 
 export interface AnchorEntry {
   meta: AnchorMeta;
@@ -50,6 +52,36 @@ export const ANCHORS: AnchorEntry[] = [
       tier: 1
     },
     build: (aspect) => new SubstrateResponseAnchor(aspect)
+  },
+  {
+    meta: {
+      id: 'telegrapher-wavepacket',
+      title: 'Telegrapher wavepacket · dispersion-free at c',
+      paperRef: '§17',
+      blurb:
+        'A Gaussian wavepacket in (q, Π) launched across an empty 28³ ' +
+        "lattice. Paper's D/τ₀ = c² guarantees coherent propagation at " +
+        'exactly the speed of light with no spreading. Companion to the ' +
+        'substrate-response anchor: this one shows the substrate as a ' +
+        'carrier, not a responder.',
+      tier: 1
+    },
+    build: (aspect) => new TelegrapherWavepacketAnchor(aspect)
+  },
+  {
+    meta: {
+      id: 'bh-merger',
+      title: 'BH–BH inspiral + ringdown',
+      paperRef: '§17, §20',
+      blurb:
+        'Two equal-mass SMBHs spiral inward, merge into one saturation ' +
+        'surface, and emit a telegrapher ringdown shell at lattice-c — ' +
+        "the paper's substrate analogue of gravitational-wave emission. " +
+        'Inspiral rate follows Peters-Mathews r ∝ (t_merge - t)^{1/4} ' +
+        'phenomenology.',
+      tier: 2
+    },
+    build: (aspect) => new BHMergerAnchor(aspect)
   },
   {
     meta: {
