@@ -14,14 +14,15 @@ import { hawkingSolar, scrambling, formatSI } from '../core/Closure';
 import { M_SUN } from '../util/units';
 import { imfSample, mainSeqLifetime, SUPERNOVA_MASS } from '../core/StellarLifecycle';
 
-// 12,000 stars across an 18-unit disk gives a real "spiral-galaxy
-// brightness wash" rather than a sparse star-cluster look. Each point
-// still represents ~10⁷ real solar systems (Milky Way has ~3×10¹¹ stars),
-// but visually the disk reads as continuous luminance with the spiral
-// arm density bunching emerging from the placement function. Per-frame
-// cost stays cheap: 12,000 × ~5 BHs = 60k ops for the RAR integration,
-// plus 36k floats for the position/color buffer update.
-const N_STARS = 12000;
+// 8,000 stars across an 18-unit disk — enough for a real spiral-galaxy
+// brightness wash without overloading the per-frame star integration
+// (~ N × 5 BHs × 2 substeps = 80k force ops/frame) or the hover raycast
+// (linear in N at every pointer event, now also throttled to 30 Hz).
+// Tried 12,000 first; visually beautiful but caused frame hitches on
+// pointer movement. Each point still represents ~10⁷ real solar
+// systems (Milky Way has ~3×10¹¹ stars) — see scale-vs-reality note
+// in the README.
+const N_STARS = 8000;
 const R_GAL   = 18;
 const G_SIM   = 0.0008;
 const A0_SIM  = 0.00010;

@@ -43,6 +43,10 @@ export class DragController {
   private velocity = new THREE.Vector3();
   private velSamples: { p: THREE.Vector3; t: number }[] = [];
   private controls: CameraControls | null = null;
+  // Throttle for the per-frame hover raycast — pointer events fire
+  // much faster than render frames, and the points-cloud intersection
+  // is linear in star count. 33 ms ≈ 30 Hz, plenty for hover feel.
+  private lastHoverMs = 0;
   onHover: (info: HoverInfo | null, clientX: number, clientY: number) => void = () => {};
   // Fired when the user clicks a draggable without dragging — used by the
   // App to pin the hover card so they can see what zooming in would target.
@@ -169,7 +173,12 @@ export class DragController {
       }
       return;
     }
-    // Hover preview (no pending, no active)
+    // Hover preview (no pending, no active). Throttled to ~30 Hz so the
+    // points-cloud raycast (linear in N, dominates at 12,000-star
+    // GalaxyRegime) doesn't fire on every pointer-move event.
+    const nowMs = performance.now();
+    if (nowMs - this.lastHoverMs < 33) return;
+    this.lastHoverMs = nowMs;
     const cam = this.getCurrentCamera();
     this.setPointsThreshold(cam);
     this.raycaster.setFromCamera(this.pointerNdc, cam);
