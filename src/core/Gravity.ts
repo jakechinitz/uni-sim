@@ -36,6 +36,11 @@ const SOFT2 = 1e-8;
 // The older simple-µ form is kept below for reference.
 export function nuRAR(y: number): number {
   if (y <= 0) return 1e15;
+  // Fast path: at y > 100 (deep Newton regime), exp(-√y) < 5×10⁻⁵, so
+  // ν is within 10⁻⁵ of 1.0. Skip the exp() call — for typical galactic
+  // interior dynamics (y ≈ 100..10⁴) this is the hot path and the exp
+  // was dominating the per-star integration cost.
+  if (y > 100) return 1.0;
   const sy = Math.sqrt(y);
   // 1 − exp(−√y) underflows for very small √y; series expansion
   //   1/(1 − exp(−x)) ≈ 1/x + 1/2 + x/12 − …

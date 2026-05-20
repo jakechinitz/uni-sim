@@ -39,6 +39,24 @@ html, body {
   user-select: none;
 }
 
+/* Scale honesty: BHs are drawn ~10⁹× larger than they actually are
+   compared to their host galaxy — without that they'd be sub-pixel.
+   The numeric labels (r_s, T_H, S_BH, …) on the hover card are real
+   physics. Sits under the epoch label, tip on hover gives the longer
+   explanation. */
+#hud-disclaimer {
+  position: fixed; top: 44px; left: 22px;
+  font-size: 10px;
+  color: rgba(255,200,120,0.62);
+  letter-spacing: 0.08em;
+  max-width: 360px;
+  line-height: 1.4;
+  text-shadow: 0 0 8px rgba(0,0,0,0.6);
+  cursor: help;
+  user-select: none;
+}
+#hud-disclaimer:hover { color: rgba(255,200,120,0.95); }
+
 #ui {
   position: fixed; left: 16px; right: 16px; bottom: 14px;
   padding: 10px 14px;
