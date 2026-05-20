@@ -1,4 +1,4 @@
-// Post-process composer: scene -> lens -> bloom -> flash -> FXAA -> output.
+// Post-process composer: scene -> lens -> flash -> FXAA -> output.
 //
 // The lens pass simulates gravitational lensing around black holes.
 // It's NOT a real null-geodesic solver — we do a per-pixel screen-space
@@ -12,7 +12,6 @@
 import * as THREE from 'three';
 import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js';
 import { RenderPass }     from 'three/examples/jsm/postprocessing/RenderPass.js';
-import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js';
 import { ShaderPass }     from 'three/examples/jsm/postprocessing/ShaderPass.js';
 import { FXAAShader }     from 'three/examples/jsm/shaders/FXAAShader.js';
 
@@ -21,7 +20,6 @@ export const MAX_LENS = 8;   // max BHs we lens per frame
 export class Composer {
   composer: EffectComposer;
   renderPass: RenderPass;
-  bloom: UnrealBloomPass;
   fxaa: ShaderPass;
   lens: ShaderPass;
   flashAmount = 0;
@@ -88,13 +86,6 @@ export class Composer {
     });
     this.composer.addPass(this.lens);
 
-    // Bloom: gentler strength + higher threshold so only the truly
-    // bright pixels (stars, accretion disks, supernovae) bloom — the
-    // bulk of the galaxy disk no longer washes out. Per-regime
-    // bloomStrength() overrides this baseline as the camera flies in.
-    this.bloom = new UnrealBloomPass(new THREE.Vector2(w / 2, h / 2), 0.55, 0.70, 0.22);
-    this.composer.addPass(this.bloom);
-
     // Flash pass for big bang / regime transitions
     this.flashPass = new ShaderPass({
       uniforms: {
@@ -131,16 +122,6 @@ export class Composer {
   setScene(scene: THREE.Scene, camera: THREE.Camera) {
     this.renderPass.scene = scene;
     this.renderPass.camera = camera;
-  }
-
-  setBloom(strength: number, radius = 0.70, threshold = 0.22) {
-    this.bloom.strength = strength;
-    this.bloom.radius = radius;
-    this.bloom.threshold = threshold;
-  }
-
-  enableBloom(on: boolean) {
-    this.bloom.enabled = on;
   }
 
   // Update the lens pass with the current frame's BH screen-positions.
@@ -189,7 +170,6 @@ export class Composer {
     const w = this.renderer.domElement.clientWidth;
     const h = this.renderer.domElement.clientHeight;
     this.composer.setSize(w, h);
-    this.bloom.setSize(w / 2, h / 2);
     this.fxaa.uniforms['resolution'].value.set(1 / w, 1 / h);
     (this.lens.material.uniforms as any).aspect.value = w / h;
   }

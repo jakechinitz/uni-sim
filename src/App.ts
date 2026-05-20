@@ -54,9 +54,8 @@ export class App {
     // light intensity without losing detail.
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
     // Bumped from 1.05 — galaxies and the cosmic web were reading too
-    // dark without bloom, and bloom made the bright cores wash out
-    // everything else. 1.25 lifts the midtones into a legible range
-    // while ACES still compresses the highlights.
+    // dark. 1.25 lifts the midtones into a legible range while ACES
+    // still compresses the highlights cleanly.
     this.renderer.toneMappingExposure = 1.25;
     this.resize();
 
@@ -75,7 +74,6 @@ export class App {
     const dummyScene = new THREE.Scene();
     const dummyCam = new THREE.PerspectiveCamera();
     this.composer = new Composer(this.renderer, dummyScene, dummyCam);
-    this.composer.enableBloom(this.state.toggles.bloom);
 
     this.regimes = new RegimeManager(this.renderer, this.composer, this.state.seed);
 
@@ -128,7 +126,6 @@ export class App {
         this.clock.playing    = this.state.playing;
         this.clock.useLogPace = this.state.logPace ?? false;
         this.regimes.setZoom(this.state.zoom);
-        this.composer.enableBloom(this.state.toggles.bloom);
         autosave(this.state);
       },
       onLoad: (data) => {
@@ -140,7 +137,6 @@ export class App {
         this.clock.useLogPace = data.logPace ?? false;
         this.regimes.setSeed(data.seed);          // also resets focus
         this.regimes.setZoom(data.zoom);
-        this.composer.enableBloom(data.toggles.bloom);
         syncControls(data);
         autosave(this.state);
       },

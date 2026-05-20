@@ -21,7 +21,8 @@ export interface SaveData {
   // ~35 wall-sec. Resets to false the moment the user touches the
   // speed slider or a preset chip.
   logPace?: boolean;
-  toggles: { entangle: boolean; bloom: boolean; disk: boolean; manyPasts: boolean };
+  // `bloom` removed in favour of always-off; field tolerated in old saves.
+  toggles: { entangle: boolean; disk: boolean; manyPasts: boolean; bloom?: boolean };
 }
 
 let saveTimer: number | null = null;
@@ -77,6 +78,6 @@ export function emptySave(seed: number): SaveData {
     direction: 1,
     playing: true,
     logPace: false,
-    toggles: { entangle: false, bloom: true, disk: true, manyPasts: false }
+    toggles: { entangle: false, disk: true, manyPasts: false }
   };
 }

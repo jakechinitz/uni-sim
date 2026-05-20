@@ -36,7 +36,9 @@ interface BHView {
 // Build a soft entanglement halo sprite for a BH. Additive blend so it
 // reads as a glow on the disk/stars behind it; opacity is driven each
 // frame by ctx.entanglementOn × mass × pulse so each BH visually
-// announces its drained capacity well.
+// announces its drained capacity. The halo is made non-pickable so
+// clicks fall through to the BH mesh itself, not the halo bounding box
+// (which would be much larger than the BH and would steal clicks).
 function makeBHHalo(scaleHint: number): THREE.Sprite {
   const halo = new THREE.Sprite(new THREE.SpriteMaterial({
     map: radialGlow(256, 'rgba(0,0,0,0)', 'rgba(122,215,255,0.55)', 'rgba(122,215,255,0)'),
@@ -46,6 +48,8 @@ function makeBHHalo(scaleHint: number): THREE.Sprite {
     opacity: 0
   }));
   halo.scale.setScalar(scaleHint);
+  // No-op raycast so the halo never intercepts pointer events.
+  halo.raycast = () => {};
   return halo;
 }
 
@@ -71,8 +75,6 @@ export class GalaxyRegime extends Regime {
   private bhs: BHView[] = [];
   private spiralMesh: THREE.Mesh;
   private spiralMat: THREE.ShaderMaterial;
-  private bulgeMesh!: THREE.Mesh;
-  private bulgeMat!: THREE.ShaderMaterial;
   private haloStars!: THREE.Points;
   private haloMesh: THREE.Sprite;
   private fieldLines: THREE.LineSegments;
@@ -87,6 +89,15 @@ export class GalaxyRegime extends Regime {
   // fades it once the hover stops being refreshed.
   private hoveredStarIdx = -1;
   private hoveredAtWall  = -10;
+  // Catch-up suppression: a freshly mounted galaxy at cosmic t ≈ 13 Gyr —
+  // or a cached galaxy revisited after cosmic time has jumped forward —
+  // would otherwise replay every historic supernova / BH-spawn / merger
+  // ringdown in a single frame, spamming the screen with telegrapher
+  // rings. While `silentCatchup` is true we still advance state (stars
+  // die, remnants spawn) but skip the visual fanfare. Set per-frame
+  // based on the cosmic-time gap since last update.
+  private silentCatchup = true;
+  private lastSeenCosmicT = -1;
   private telegrapher = new TelegrapherField(2.0, new THREE.Color(0x9ee0ff));
   private manyPasts = new ManyPasts(new THREE.Color(0x9b8dff), 2.5);
   // Supernova flare pool — when a massive star dies it spawns one of
@@ -138,7 +149,9 @@ export class GalaxyRegime extends Regime {
       this.draggable.add(mesh);
       // Central halo: large (proportional to SMBH mass), parented so it
       // moves with the BH when dragged. Opacity driven in update().
-      const halo = makeBHHalo(R_GAL * 1.8);
+      // Central SMBH halo: sized to the visible BH radius, not the
+      // whole galaxy — anything larger looks like a glass dome.
+      const halo = makeBHHalo(radius * 6);
       mesh.add(halo);
       this.bhs.push({
         mesh,
@@ -192,7 +205,7 @@ export class GalaxyRegime extends Regime {
         vx = -sgn * Math.sin(ang) * vc;
         vz =  sgn * Math.cos(ang) * vc;
       }
-      const halo = makeBHHalo(2.5 + 0.35 * Math.log(Math.max(massSolar, 1)));
+      const halo = makeBHHalo(radius * 5);
       mesh.add(halo);
       this.bhs.push({
         mesh,
@@ -221,13 +234,12 @@ export class GalaxyRegime extends Regime {
     this.haloMesh.scale.setScalar(R_GAL * 3.8);
     this.scene.add(this.haloMesh);
 
-    // Spiral background disk shader. Layers (matching real spirals):
-    //   - exponential bulge (Sérsic-ish n≈4) concentrated near center
+    // Spiral background disk shader. Three structural layers:
+    //   - exponential bulge concentrated near the centre
     //   - exponential disk falloff in radius
     //   - 2 main log-spiral arms + 2 weaker secondary arms
-    //   - dust lane along the inner edge of each arm (offset spiral)
-    //   - sparse pinkish H II star-forming regions along arm peaks
-    //   - bluer outer disk, warm yellow-white bulge
+    // (Removed: dust lanes + H II regions — those were cosmetic and
+    //  don't correspond to anything in the paper.)
     const spiralGeom = new THREE.CircleGeometry(R_GAL, 160);
     this.spiralMat = new THREE.ShaderMaterial({
       transparent: true,
@@ -239,7 +251,6 @@ export class GalaxyRegime extends Regime {
         coreColor:  { value: new THREE.Color('#fff4d0') },   // bulge: warm yellow-white
         midColor:   { value: new THREE.Color('#ffc890') },   // mid-disk: warm
         edgeColor:  { value: new THREE.Color('#88b8ff') },   // outer disk: cool young blue
-        hiiColor:   { value: new THREE.Color('#ff7090') },   // H II regions: pink
         // Driven by cosmic time so the disk fades up as the galaxy assembles
         alphaGlobal: { value: 1 }
       },
@@ -252,16 +263,8 @@ export class GalaxyRegime extends Regime {
       `,
       fragmentShader: /* glsl */`
         uniform float time, twist, alphaGlobal;
-        uniform vec3  coreColor, midColor, edgeColor, hiiColor;
+        uniform vec3  coreColor, midColor, edgeColor;
         varying vec2 vP;
-        float hash(vec2 p){ p=fract(p*vec2(123.34,456.21)); p+=dot(p,p+34.345); return fract(p.x*p.y); }
-        float noise(vec2 p){
-          vec2 i=floor(p), f=fract(p);
-          vec2 u=f*f*(3.0-2.0*f);
-          return mix(mix(hash(i),hash(i+vec2(1,0)),u.x),
-                     mix(hash(i+vec2(0,1)),hash(i+vec2(1,1)),u.x), u.y);
-        }
-        float fbm(vec2 p){ float v=0., a=0.5; for(int i=0;i<4;i++){ v+=a*noise(p); p*=2.07; a*=0.5; } return v; }
 
         void main(){
           float r = length(vP);
@@ -271,7 +274,7 @@ export class GalaxyRegime extends Regime {
           float ang = atan(vP.y, vP.x);
 
           // --- structural intensity layers ---
-          // Bulge: sharp exponential central glow (mimics Sérsic n≈4 falloff)
+          // Bulge: sharp exponential central glow
           float bulge = exp(-t * 9.5);
           // Disk: shallower exponential, then soft outer truncation
           float disk = exp(-t * 2.2) * (1.0 - smoothstep(0.93, 1.0, t));
@@ -282,79 +285,22 @@ export class GalaxyRegime extends Regime {
           float arm4   = pow(0.5 + 0.5 * cos(4.0 * ph + 0.7), 6.0) * 0.45;
           float armStr = arm2 + arm4;
 
-          // Dust lane on the inner edge of each arm (phase-shifted, narrower)
-          float dustPh   = ph + 0.65;
-          float dustArm  = pow(0.5 + 0.5 * cos(2.0 * dustPh), 14.0);
-          float dustMod  = 1.0 - dustArm * 0.6 * smoothstep(0.02, 0.6, t);
-
-          // Knotty noise modulation along arms (clumps, dark patches)
-          float clump = 0.65 + 0.55 * fbm(vec2(ang * 5.0, t * 11.0) + time * 0.04);
-          armStr *= clump;
-
-          // H II star-forming regions: bright pinkish noise spots ON arm peaks
-          float hii = smoothstep(0.62, 0.86,
-                       fbm(vec2(ang * 7.0, t * 14.0) + time * 0.07)) * arm2;
-
           // Combine — bulge dominates centre, disk × arms dominate outwards
-          float intensity = (1.5 * bulge + disk * (0.45 + 0.85 * armStr)) * dustMod;
+          float intensity = 1.5 * bulge + disk * (0.45 + 0.85 * armStr);
 
           // --- colour palette by radius ---
           vec3 col = mix(edgeColor, midColor, smoothstep(0.8, 0.25, t));
           col = mix(col, coreColor, smoothstep(0.25, 0.04, t));     // bulge tint
-          col = mix(col, hiiColor, hii * 0.85);                      // H II splashes
 
           gl_FragColor = vec4(col, clamp(intensity * alphaGlobal, 0.0, 1.0));
+          // suppress unused-uniform warning
+          float _t = time;
         }
       `
     });
     this.spiralMesh = new THREE.Mesh(spiralGeom, this.spiralMat);
     this.spiralMesh.rotation.x = -Math.PI / 2;
     this.scene.add(this.spiralMesh);
-
-    // 3D bulge — small additive sphere giving the galaxy proper above/below
-    // thickness at the centre. Looks correct when the camera dips below the
-    // disk plane (otherwise the disk is paper-flat and the bulge vanishes).
-    const bulgeR = R_GAL * 0.18;
-    const bulgeGeom = new THREE.SphereGeometry(bulgeR, 48, 32);
-    const bulgeMat = new THREE.ShaderMaterial({
-      transparent: true,
-      blending: THREE.AdditiveBlending,
-      depthWrite: false,
-      uniforms: {
-        bulgeR: { value: bulgeR },
-        col:    { value: new THREE.Color('#fff4d0') },
-        alpha:  { value: 1 }
-      },
-      vertexShader: /* glsl */`
-        varying float vR;
-        varying vec3 vN; varying vec3 vV;
-        void main(){
-          vR = length(position);
-          vN = normalize(normalMatrix * normal);
-          vec4 p = modelViewMatrix * vec4(position, 1.0);
-          vV = normalize(-p.xyz);
-          gl_Position = projectionMatrix * p;
-        }
-      `,
-      fragmentShader: /* glsl */`
-        uniform float bulgeR, alpha;
-        uniform vec3 col;
-        varying float vR;
-        varying vec3 vN; varying vec3 vV;
-        void main(){
-          // Exponential brightness falloff from sphere centre toward surface,
-          // plus a soft Fresnel rim so the bulge has a hot edge.
-          float t = vR / bulgeR;
-          float i = exp(-t * 3.4);
-          float fres = pow(1.0 - abs(dot(normalize(vN), normalize(vV))), 1.6);
-          float a = clamp(i * 0.55 + fres * 0.35, 0.0, 1.0);
-          gl_FragColor = vec4(col * (0.7 + 0.6 * fres), a * alpha);
-        }
-      `
-    });
-    this.bulgeMesh = new THREE.Mesh(bulgeGeom, bulgeMat);
-    this.bulgeMat = bulgeMat;
-    this.scene.add(this.bulgeMesh);
 
     // Spherical halo of population-II stars — old, redder, scattered above
     // and below the disk plane. Real spirals have a dim spheroidal halo
@@ -575,7 +521,11 @@ export class GalaxyRegime extends Regime {
           keep.realMassSolar += gone.realMassSolar;
           keep.mesh.position.set(keep.body.pos[0], keep.body.pos[1], keep.body.pos[2]);
           // Merger ringdown — telegrapher front propagating at substrate-c
-          this.telegrapher.emit(keep.mesh.position.clone(), R_GAL * 1.6, 1.4);
+          // (skipped during the first-tick catch-up so historic mergers
+          // don't all ring at once.)
+          if (!this.silentCatchup) {
+            this.telegrapher.emit(keep.mesh.position.clone(), R_GAL * 1.6, 1.4);
+          }
           // Remove the absorbed BH from scene + draggable + bhs[]
           this.scene.remove(gone.mesh);
           this.draggable.remove(gone.mesh);
@@ -601,6 +551,9 @@ export class GalaxyRegime extends Regime {
   // get a softer planetary-nebula glow. Drives the "this is actually
   // a supernova, not a bright pixel" reading.
   private spawnSNFlare(s: Star, tG: number) {
+    // Historic deaths skip the visual — the regime mounted at present-day
+    // and we don't want to replay every supernova from the past 13 Gyr.
+    if (this.silentCatchup) return;
     const type: 'sn' | 'pn' = s.mass >= SUPERNOVA_MASS ? 'sn' : 'pn';
     const sp = new THREE.Sprite(new THREE.SpriteMaterial({
       map: this.snFlareTex,
@@ -663,7 +616,7 @@ export class GalaxyRegime extends Regime {
     mesh.userData = { type: 'bh', index: this.bhs.length };
     this.scene.add(mesh);
     this.draggable.add(mesh);
-    const halo = makeBHHalo(2 + 0.3 * Math.log(Math.max(remMsun, 1)));
+    const halo = makeBHHalo(radius * 5);
     mesh.add(halo);
     this.bhs.push({
       mesh,
@@ -681,8 +634,11 @@ export class GalaxyRegime extends Regime {
       diskTiltAngle: 0,
       entHalo: halo
     });
-    // Supernova ringdown
-    this.telegrapher.emit(mesh.position.clone(), R_GAL * 1.3, 1.2);
+    // Supernova ringdown — skip during the first-tick catch-up so
+    // a freshly-mounted galaxy doesn't burst with historic ringdowns.
+    if (!this.silentCatchup) {
+      this.telegrapher.emit(mesh.position.clone(), R_GAL * 1.3, 1.2);
+    }
   }
 
   private centralMass(): number {
@@ -703,6 +659,15 @@ export class GalaxyRegime extends Regime {
   }
 
   update(ctx: RegimeContext, dt: number): void {
+    // Detect first-tick or cache-restore catch-up: if cosmic time jumped
+    // more than ~1 Myr since the last update we saw, suppress visuals
+    // this frame so historic supernovae don't all fire at once.
+    const cosmicGap = this.lastSeenCosmicT < 0
+      ? Infinity
+      : Math.abs(ctx.time - this.lastSeenCosmicT);
+    this.silentCatchup = cosmicGap > 0.005;
+    this.lastSeenCosmicT = ctx.time;
+
     // dt is sim seconds. Clamp the per-frame step so fast-forward doesn't
     // shatter orbits; wall-time accumulator drives pure-UI animations (halo
     // fade, camera pan) so they stay alive at extreme speeds.
@@ -731,9 +696,7 @@ export class GalaxyRegime extends Regime {
     // Disk toggle — when off, just the stars + BHs are visible (much more
     // legible from below the galactic plane).
     this.spiralMesh.visible = ctx.diskOn && galaxyAlpha > 0.01;
-    // Bulge + halo stars fade in with the disk
-    this.bulgeMesh.visible = ctx.diskOn && galaxyAlpha > 0.01;
-    this.bulgeMat.uniforms.alpha.value = galaxyAlpha;
+    // Halo stars fade in with the disk
     this.haloStars.visible = ctx.diskOn && galaxyAlpha > 0.01;
     (this.haloStars.material as THREE.PointsMaterial).opacity = 0.55 * galaxyAlpha;
     for (const b of this.bhs) b.mesh.tick(this.time);
