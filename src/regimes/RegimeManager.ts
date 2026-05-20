@@ -10,7 +10,6 @@ import { Regime } from './Regime';
 import { CosmicRegime }    from './CosmicRegime';
 import { GalaxyRegime }    from './GalaxyRegime';
 import { SystemRegime }    from './SystemRegime';
-import { PlanetRegime }    from './PlanetRegime';
 import { AtomicRegime }    from './AtomicRegime';
 import { SubstrateRegime } from './SubstrateRegime';
 import { decodeZoom, RegimeKey } from '../core/Camera';
@@ -22,7 +21,6 @@ const REGISTRY: Record<RegimeKey, Ctor> = {
   COSMIC:    CosmicRegime,
   GALAXY:    GalaxyRegime,
   SYSTEM:    SystemRegime,
-  PLANET:    PlanetRegime,
   ATOMIC:    AtomicRegime,
   SUBSTRATE: SubstrateRegime,
 };
@@ -32,7 +30,6 @@ function focusContextFor(key: RegimeKey, f: FocusState): string {
     case 'COSMIC':    return '';
     case 'GALAXY':    return f.galaxyId ?? '';
     case 'SYSTEM':    return `${f.galaxyId ?? ''}|${f.starId ?? ''}`;
-    case 'PLANET':    return `${f.galaxyId ?? ''}|${f.starId ?? ''}|${f.planetId ?? ''}`;
     case 'ATOMIC':    return '';
     case 'SUBSTRATE': return '';
   }
@@ -51,7 +48,7 @@ const CACHE_LIMIT = 6;
 export class RegimeManager {
   current!: Regime;
   currentKey: RegimeKey = 'COSMIC';
-  focus: FocusState = { galaxyId: null, starId: null, planetId: null };
+  focus: FocusState = { galaxyId: null, starId: null };
   // App attaches this to swap OrbitControls onto the new camera whenever
   // the active regime changes.
   onRegimeChange?: (regime: Regime, key: RegimeKey) => void;
@@ -76,7 +73,7 @@ export class RegimeManager {
 
   setSeed(seed: number) {
     this.seed = seed;
-    this.focus = { galaxyId: null, starId: null, planetId: null };
+    this.focus = { galaxyId: null, starId: null };
     this.pinned.clear();
     // Seed change invalidates the whole cache (every regime would need
     // rebuilding against the new base seed anyway)
@@ -87,7 +84,7 @@ export class RegimeManager {
   }
 
   resetFocus() {
-    this.focus = { galaxyId: null, starId: null, planetId: null };
+    this.focus = { galaxyId: null, starId: null };
     this.pinned.clear();
   }
 
@@ -135,7 +132,6 @@ export class RegimeManager {
     // camera-ray fallback published by regimes.
     if (p.galaxyId !== undefined && !this.pinned.has('galaxyId')) this.focus.galaxyId = p.galaxyId;
     if (p.starId   !== undefined && !this.pinned.has('starId'))   this.focus.starId   = p.starId;
-    if (p.planetId !== undefined && !this.pinned.has('planetId')) this.focus.planetId = p.planetId;
   }
 
   resize(w: number, h: number) {

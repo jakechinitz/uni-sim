@@ -5,7 +5,7 @@ import * as THREE from 'three';
 import { Regime, RegimeContext, DragTarget, HoverInfo, FocusState } from './Regime';
 import { mulberry32 } from '../core/Rng';
 import { hashStr } from '../util/hash';
-import { radialGlow } from '../render/Glow';
+import { radialGlow, deltaSField } from '../render/Glow';
 import { BlackHole } from '../render/BlackHole';
 import { Body, nuRAR } from '../core/Gravity';
 import { TelegrapherField } from '../render/Telegrapher';
@@ -33,22 +33,23 @@ interface BHView {
                          // so dragging the BH moves its halo with it.
 }
 
-// Build a soft entanglement halo sprite for a BH. Additive blend so it
-// reads as a glow on the disk/stars behind it; opacity is driven each
-// frame by ctx.entanglementOn × mass × pulse so each BH visually
-// announces its drained capacity. The halo is made non-pickable so
-// clicks fall through to the BH mesh itself, not the halo bounding box
-// (which would be much larger than the BH and would steal clicks).
+// Build a δS-field halo sprite for a BH. The texture's alpha profile
+// is the paper's static-limit capacity drain δS ∝ r_s/r (paper §11),
+// clamped to 1 inside the horizon and quadratic-faded at the sprite
+// edge. When multiple bodies' halos overlap, additive blending sums
+// them — exactly how the static linearised equation ∇²δS = −(κ/γ)ρ
+// superposes contributions. Opacity is driven each frame by
+// ctx.entanglementOn × pulse so each BH announces its drained
+// capacity. Non-pickable so clicks fall through to the BH mesh itself.
 function makeBHHalo(scaleHint: number): THREE.Sprite {
   const halo = new THREE.Sprite(new THREE.SpriteMaterial({
-    map: radialGlow(256, 'rgba(0,0,0,0)', 'rgba(122,215,255,0.55)', 'rgba(122,215,255,0)'),
+    map: deltaSField(256, 0.06, '#7ad7ff'),
     color: 0x7ad7ff,
     blending: THREE.AdditiveBlending,
     depthWrite: false, transparent: true,
     opacity: 0
   }));
   halo.scale.setScalar(scaleHint);
-  // No-op raycast so the halo never intercepts pointer events.
   halo.raycast = () => {};
   return halo;
 }
@@ -872,14 +873,17 @@ export class GalaxyRegime extends Regime {
     this.posAttr.needsUpdate = true;
     this.colAttr.needsUpdate = true;
 
-    // BH drag-follow
+    // BH drag-follow + per-frame q-field uniform sync. The q-field
+    // shader on each BH needs the BH's world position and the camera's
+    // world position to ray-trace impact parameters each frame.
     for (const bh of this.bhs) {
       bh.mesh.position.set(bh.body.pos[0], bh.body.pos[1], bh.body.pos[2]);
+      bh.mesh.syncQField(bh.mesh.position, this.camera.position);
     }
     // Compute the far-field q at each BH's location from every OTHER BH.
     // q(r) = max(0, 1 − Σ rs_j / r_ij) — paper's substrate primitive.
-    // Feed it into each BH's photon ring so close BH pairs visibly dim
-    // each other's rings (paper's N²=q lapse made visible).
+    // Feed it into each BH's q-shell so close BH pairs visibly drain
+    // each other's photon ring (paper's N²=q lapse made visible).
     const RS_LAPSE = 0.18;        // sim units per unit mass for the lapse
     for (let i = 0; i < this.bhs.length; i++) {
       const bi = this.bhs[i];

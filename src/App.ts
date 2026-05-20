@@ -23,7 +23,6 @@ const REGIME_LIMITS: Record<RegimeKey, { min: number; max: number }> = {
   COSMIC:    { min: 12,  max: 200 },
   GALAXY:    { min: 5,   max: 80  },
   SYSTEM:    { min: 35,  max: 550 },
-  PLANET:    { min: 1.5, max: 6   },
   ATOMIC:    { min: 6,   max: 22  },
   SUBSTRATE: { min: 6,   max: 45  },
 };
@@ -174,17 +173,14 @@ export class App {
 
   // Convert a clicked draggable's id into a focus pin on the right
   // field for the current regime. Galaxies pin the cosmic-web focus;
-  // stars pin the galactic focus; planets pin the system focus.
-  // BH clicks at GALAXY scale don't pin starId (BHs aren't stars; the
-  // hover card pin is still useful but a drill-in needs a real star).
-  // Defects and unrecognised ids fall through harmlessly.
+  // stars pin the galactic focus. BH clicks don't pin starId (BHs
+  // aren't stars; the hover card pin is still useful but drill-in
+  // needs a real star). Defects and unrecognised ids fall through.
   private applyClickFocus(id: string) {
     if (id.startsWith('gx-')) {
       this.regimes.pinFocus('galaxyId', id);
     } else if (id.startsWith('st-')) {
       this.regimes.pinFocus('starId', id);
-    } else if (id.startsWith('p-')) {
-      this.regimes.pinFocus('planetId', id);
     }
   }
 
