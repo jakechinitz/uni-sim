@@ -8,13 +8,17 @@ export const H0  = 2.18e-18;    // Hubble today, s^-1 (~67 km/s/Mpc)
 export const TET_FACES   = 4;
 export const FACE_STATES = 7;
 export const TET_MICROSTATES = 1680;
-export const G_SHARE_EFF = 7.42;
+// Paper line 558 (App. B): g_share,eff = 7.41980002357 — admissibility-
+// closed effective sharing entropy. Using full paper precision so the
+// L* and G* downstream numbers match the paper's target values
+// (L* = 1.60771947 × 10⁻³⁵ m, G* = 6.60399128 × 10⁻¹¹ m³ kg⁻¹ s⁻²).
+export const G_SHARE_EFF = 7.41980002357;
 
 // a₀ derived from the paper's closure: a₀ = g_share,eff · cH₀ / (4π²)
-// (paper §14, no fit). Comes out to ~1.06×10⁻¹⁰ m/s² — within 12% of
-// McGaugh's empirical 1.2×10⁻¹⁰. Used everywhere instead of the old
-// hardcoded value so the live sim, the Closure panel, and the paper
-// all agree on a single number.
+// (paper §14 eq. 9, no fit). With H₀ = 2.18×10⁻¹⁸ s⁻¹ (≈ 67.3 km/s/Mpc)
+// this evaluates to ~1.228 × 10⁻¹⁰ m/s² — within ~2.3 % of McGaugh's
+// empirical 1.20 × 10⁻¹⁰. Used everywhere instead of a hardcoded value
+// so the live sim, the Closure panel, and the paper all agree.
 export const a0 = (G_SHARE_EFF / (4 * Math.PI * Math.PI)) * c * H0;
 
 export const M_SUN = 1.989e30;  // kg
@@ -38,7 +42,6 @@ export const SCALE = {
   COSMIC:    25,
   GALAXY:    21,
   SYSTEM:    13,
-  PLANET:    7,
   ATOMIC:    -10,
   SUBSTRATE: -16,
 } as const;
