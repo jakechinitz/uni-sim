@@ -2,7 +2,7 @@
 // RAR collapses to Newton at AU scale (g_bar >> a0), so orbits look correct.
 
 import * as THREE from 'three';
-import { Regime, RegimeContext, DragTarget, FocusState } from './Regime';
+import { Regime, RegimeContext, DragTarget } from './Regime';
 import { mulberry32 } from '../core/Rng';
 import { hashStr } from '../util/hash';
 import { radialGlow } from '../render/Glow';
@@ -320,6 +320,8 @@ export class SystemRegime extends Regime {
     } else if (this.remnant) {
       // BH remnant — slowly grows its accretion disk visually
       this.remnant.tick(this.time);
+      // q-field shell needs per-frame uniforms (BH centre + camera pos)
+      this.remnant.syncQField(this.remnant.position, this.camera.position);
     }
     for (let i = 0; i < this.planets.length; i++) {
       const pv = this.planets[i];
@@ -425,29 +427,6 @@ export class SystemRegime extends Regime {
 
   bloomStrength(_ctx: RegimeContext): number {
     return 0.4;
-  }
-
-  // Publish the focused planet = the planet nearest the camera's
-  // forward ray. Index → "p-N" id, stable per seed. Committed when
-  // zoom crosses into PLANET.
-  publishFocus(): Partial<FocusState> | null {
-    const camPos = this.camera.position;
-    const fwd = new THREE.Vector3();
-    this.camera.getWorldDirection(fwd);
-    let bestId: string | null = null;
-    let bestPerp2 = Infinity;
-    for (const pv of this.planets) {
-      const dx = pv.body.pos[0] - camPos.x;
-      const dy = pv.body.pos[1] - camPos.y;
-      const dz = pv.body.pos[2] - camPos.z;
-      const along = dx * fwd.x + dy * fwd.y + dz * fwd.z;
-      if (along < 1) continue;             // behind / too close
-      const total2 = dx * dx + dy * dy + dz * dz;
-      const perp2  = total2 - along * along;
-      if (perp2 < bestPerp2) { bestPerp2 = perp2; bestId = pv.body.id; }
-    }
-    if (bestId === null) return null;
-    return { planetId: bestId };
   }
 
   lensSources(): { worldPos: THREE.Vector3; radius: number }[] {
