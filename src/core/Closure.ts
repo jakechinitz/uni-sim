@@ -131,3 +131,29 @@ export function cellScrambling(T_cell_K: number) {
   const t_scr = (beta * HBAR / (2 * Math.PI)) * lnS;
   return { t_scr, beta, lnS };
 }
+
+// Charged-lepton mass ladder (paper §I.1, eq. immediately above the
+// "Mass ladder and numerical accuracy" subhead):
+//   m_N/m_e = 720^N · (2/7)^{N²},   N = 0, 1, 2
+// where N indexes the three charged-lepton generations (0 = electron,
+// 1 = muon, 2 = tau). The 720 is the first-shell reduced-alphabet
+// entropy (e^ln 720), the (2/7) is the orientation-summed singlet
+// projection from the same 7-state alphabet that fixes Ω_tet = 1680,
+// and the N² exponent is the source-norm structure of the scalar EFT.
+// No fitted parameters; paper-reported residuals 0.5 % (μ), 0.7 % (τ).
+// Three-generation termination follows from closure-spectrum collapse
+// at N=3, not assumed (paper §I.1).
+const M_MU_PDG  = 206.7682830;       // PDG ratio m_μ/m_e
+const M_TAU_PDG = 3477.23;           // PDG ratio m_τ/m_e
+
+export function leptonLadder() {
+  const ratio = (N: number) => Math.pow(720, N) * Math.pow(2 / 7, N * N);
+  const r_mu   = ratio(1);
+  const r_tau  = ratio(2);
+  return {
+    formula: 'm_N/m_e = 720^N · (2/7)^{N²}',
+    electron: { N: 0, predicted: ratio(0), pdg: 1,         devPct: 0 },
+    muon:     { N: 1, predicted: r_mu,     pdg: M_MU_PDG,  devPct: (r_mu  - M_MU_PDG)  / M_MU_PDG  * 100 },
+    tau:      { N: 2, predicted: r_tau,    pdg: M_TAU_PDG, devPct: (r_tau - M_TAU_PDG) / M_TAU_PDG * 100 },
+  };
+}

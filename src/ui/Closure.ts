@@ -2,7 +2,7 @@
 // 1,680 microstates → η* → g_share,eff → J_eff^(ren) → L* → G
 // (paper §6–9, §13). Every value is computed, not hard-coded.
 
-import { computeClosure, formatSI } from '../core/Closure';
+import { computeClosure, formatSI, leptonLadder } from '../core/Closure';
 
 interface ChainRow {
   step: string;
@@ -86,6 +86,28 @@ function chainRows(): ChainRow[] {
   ];
 }
 
+function leptonRows(): ChainRow[] {
+  const L = leptonLadder();
+  const fmt = (x: number) => x.toFixed(2);
+  const pct = (d: number) => `${d > 0 ? '+' : ''}${d.toFixed(2)} %`;
+  return [
+    {
+      step: 'μ',
+      what: 'Muon mass ratio',
+      detail: `${L.formula}, N=1 → 720·(2/7) = 1440/7`,
+      value: `${fmt(L.muon.predicted)} (PDG ${fmt(L.muon.pdg)}; ${pct(L.muon.devPct)})`,
+      tone: Math.abs(L.muon.devPct) < 1 ? 'match' : undefined
+    },
+    {
+      step: 'τ',
+      what: 'Tau mass ratio',
+      detail: `${L.formula}, N=2 → 720²·(2/7)⁴`,
+      value: `${fmt(L.tau.predicted)} (PDG ${fmt(L.tau.pdg)}; ${pct(L.tau.devPct)})`,
+      tone: Math.abs(L.tau.devPct) < 1 ? 'match' : undefined
+    },
+  ];
+}
+
 let panelEl: HTMLDivElement | null = null;
 let bodyEl:  HTMLDivElement | null = null;
 
@@ -95,22 +117,33 @@ function ensureRendered() {
   if (!bodyEl) return;
 
   if (bodyEl.dataset.rendered === '1') return;
-  const rows = chainRows();
-  bodyEl.innerHTML = rows.map(r => `
+  const renderRow = (r: ChainRow) => `
     <div class="chain-step${r.tone ? ' ' + r.tone : ''}">
       <div class="n">${r.step}</div>
       <div class="what">${r.what}${r.detail ? `<br><em>${r.detail}</em>` : ''}</div>
       <div class="val">${r.value}</div>
     </div>
-  `).join('') + `
-    <div class="chain-foot">
+  `;
+  bodyEl.innerHTML = chainRows().map(renderRow).join('') +
+    `<div class="chain-foot">
       The chain runs <em>top to bottom with zero free parameters</em>. The electron
       mass — the lightest one-bit fermionic defect — sets the substrate spacing
       L*, which in turn sets G*. Match to Newton at the 1% level is a closure
       result, not a fit. The MOND scale a₀ arises from the same arithmetic
       crossed with the cosmological horizon thermal acceleration cH₀.
     </div>
-  `;
+    <div class="panel-title" style="margin-top:18px; padding-top:14px; border-top:1px solid var(--line);">
+      Charged-lepton mass ladder · paper §I.1
+    </div>
+    ` +
+    leptonRows().map(renderRow).join('') +
+    `<div class="chain-foot">
+      Three-generation termination follows from K²-spectrum collapse at N=3
+      (not assumed). The 720 is the first-shell reduced-alphabet entropy;
+      the (2/7) is the orientation-summed singlet projection from the same
+      seven-state alphabet that fixed Ω<sub>tet</sub> = 1,680. <em>Zero parameters
+      fitted to lepton data.</em>
+    </div>`;
   bodyEl.dataset.rendered = '1';
 }
 
