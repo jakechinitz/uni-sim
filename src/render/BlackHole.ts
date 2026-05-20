@@ -70,14 +70,19 @@ export class BlackHole extends THREE.Group {
         varying vec3 vN; varying vec3 vV;
         void main(){
           float f = 1.0 - abs(dot(normalize(vN), normalize(vV)));
-          float ring = pow(f, 5.0);
-          // Far-field q damps the ring: when the surroundings are
-          // already drained (nearby companion) the photon ring fades —
-          // paper §strong-field lapse N²=q applied to the ring photons.
-          // Multiplier dropped from 2.6 → 1.8 so the SMBH doesn't drown
-          // out the stars / solar systems orbiting it.
+          // Wider, softer bright band — exponent dropped from 5 → 3 so
+          // the ring is a thicker donut, not a razor rim.
+          float ring = pow(f, 3.0);
+          // Soft inner haze: very dim emission from the front face of the
+          // sphere fades the hard transition from photon ring → horizon
+          // shadow. Without it the dark central disc reads as a stark
+          // geometric circle; with it the boundary feels diffused like a
+          // real BH image where light-bending blurs the shadow edge.
+          float inner = pow(1.0 - f, 1.5) * 0.10;
+          // Far-field q damps everything: when surroundings are already
+          // drained by a neighbour, the ring fades (paper N²=q lapse).
           float lapse = clamp(localQ, 0.05, 1.0);
-          gl_FragColor = vec4(color, ring * 1.8 * lapse);
+          gl_FragColor = vec4(color, (ring * 1.8 + inner) * lapse);
         }
       `
     });
