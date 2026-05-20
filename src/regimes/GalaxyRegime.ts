@@ -71,6 +71,9 @@ export class GalaxyRegime extends Regime {
   private bhs: BHView[] = [];
   private spiralMesh: THREE.Mesh;
   private spiralMat: THREE.ShaderMaterial;
+  private bulgeMesh!: THREE.Mesh;
+  private bulgeMat!: THREE.ShaderMaterial;
+  private haloStars!: THREE.Points;
   private haloMesh: THREE.Sprite;
   private fieldLines: THREE.LineSegments;
   private flMaterial: THREE.LineBasicMaterial;
@@ -218,21 +221,25 @@ export class GalaxyRegime extends Regime {
     this.haloMesh.scale.setScalar(R_GAL * 3.8);
     this.scene.add(this.haloMesh);
 
-    // Spiral background disk shader (the bulk light of the disk)
-    const spiralGeom = new THREE.CircleGeometry(R_GAL, 96);
+    // Spiral background disk shader. Layers (matching real spirals):
+    //   - exponential bulge (Sérsic-ish n≈4) concentrated near center
+    //   - exponential disk falloff in radius
+    //   - 2 main log-spiral arms + 2 weaker secondary arms
+    //   - dust lane along the inner edge of each arm (offset spiral)
+    //   - sparse pinkish H II star-forming regions along arm peaks
+    //   - bluer outer disk, warm yellow-white bulge
+    const spiralGeom = new THREE.CircleGeometry(R_GAL, 160);
     this.spiralMat = new THREE.ShaderMaterial({
       transparent: true,
       blending: THREE.AdditiveBlending,
       depthWrite: false,
       uniforms: {
         time:       { value: 0 },
-        arms:       { value: 2 },
-        twist:      { value: 4.1 },
-        innerCut:   { value: 0.42 },
-        outerSoft:  { value: 0.96 },
-        coreColor:  { value: new THREE.Color('#fff0c8') },
-        midColor:   { value: new THREE.Color('#ffaa90') },
-        edgeColor:  { value: new THREE.Color('#7ad7ff') },
+        twist:      { value: 4.4 },
+        coreColor:  { value: new THREE.Color('#fff4d0') },   // bulge: warm yellow-white
+        midColor:   { value: new THREE.Color('#ffc890') },   // mid-disk: warm
+        edgeColor:  { value: new THREE.Color('#88b8ff') },   // outer disk: cool young blue
+        hiiColor:   { value: new THREE.Color('#ff7090') },   // H II regions: pink
         // Driven by cosmic time so the disk fades up as the galaxy assembles
         alphaGlobal: { value: 1 }
       },
@@ -244,8 +251,8 @@ export class GalaxyRegime extends Regime {
         }
       `,
       fragmentShader: /* glsl */`
-        uniform float time, arms, twist, innerCut, outerSoft, alphaGlobal;
-        uniform vec3  coreColor, midColor, edgeColor;
+        uniform float time, twist, alphaGlobal;
+        uniform vec3  coreColor, midColor, edgeColor, hiiColor;
         varying vec2 vP;
         float hash(vec2 p){ p=fract(p*vec2(123.34,456.21)); p+=dot(p,p+34.345); return fract(p.x*p.y); }
         float noise(vec2 p){
@@ -254,22 +261,48 @@ export class GalaxyRegime extends Regime {
           return mix(mix(hash(i),hash(i+vec2(1,0)),u.x),
                      mix(hash(i+vec2(0,1)),hash(i+vec2(1,1)),u.x), u.y);
         }
+        float fbm(vec2 p){ float v=0., a=0.5; for(int i=0;i<4;i++){ v+=a*noise(p); p*=2.07; a*=0.5; } return v; }
+
         void main(){
           float r = length(vP);
           float R = ${R_GAL.toFixed(2)};
-          if (r > R || r < 0.001) discard;
-          float t = r / R;
+          if (r > R || r < 0.0005) discard;
+          float t   = r / R;                            // 0..1 normalised radius
           float ang = atan(vP.y, vP.x);
-          float ph = ang + twist * log(max(t, 0.04));
-          float armStr = 0.5 + 0.5 * cos(arms * ph);
-          armStr = pow(armStr, 6.0);
-          // dust lanes — subtract a thin band
-          armStr *= 0.7 + 0.6 * noise(vec2(ang * 6.0, t * 12.0) + time * 0.05);
-          float core = smoothstep(0.0, innerCut, 1.0 - t);
-          float disk = (1.0 - smoothstep(outerSoft, 1.0, t));
-          float intensity = (0.6 * core + 0.45 * armStr) * disk;
-          vec3 col = mix(edgeColor, midColor, smoothstep(0.7, 0.2, t));
-          col = mix(col, coreColor, core);
+
+          // --- structural intensity layers ---
+          // Bulge: sharp exponential central glow (mimics Sérsic n≈4 falloff)
+          float bulge = exp(-t * 9.5);
+          // Disk: shallower exponential, then soft outer truncation
+          float disk = exp(-t * 2.2) * (1.0 - smoothstep(0.93, 1.0, t));
+
+          // Log-spiral arms — 2 main + 2 weaker secondary (offset phase)
+          float ph     = ang + twist * log(max(t, 0.03));
+          float arm2   = pow(0.5 + 0.5 * cos(2.0 * ph), 9.0);
+          float arm4   = pow(0.5 + 0.5 * cos(4.0 * ph + 0.7), 6.0) * 0.45;
+          float armStr = arm2 + arm4;
+
+          // Dust lane on the inner edge of each arm (phase-shifted, narrower)
+          float dustPh   = ph + 0.65;
+          float dustArm  = pow(0.5 + 0.5 * cos(2.0 * dustPh), 14.0);
+          float dustMod  = 1.0 - dustArm * 0.6 * smoothstep(0.02, 0.6, t);
+
+          // Knotty noise modulation along arms (clumps, dark patches)
+          float clump = 0.65 + 0.55 * fbm(vec2(ang * 5.0, t * 11.0) + time * 0.04);
+          armStr *= clump;
+
+          // H II star-forming regions: bright pinkish noise spots ON arm peaks
+          float hii = smoothstep(0.62, 0.86,
+                       fbm(vec2(ang * 7.0, t * 14.0) + time * 0.07)) * arm2;
+
+          // Combine — bulge dominates centre, disk × arms dominate outwards
+          float intensity = (1.5 * bulge + disk * (0.45 + 0.85 * armStr)) * dustMod;
+
+          // --- colour palette by radius ---
+          vec3 col = mix(edgeColor, midColor, smoothstep(0.8, 0.25, t));
+          col = mix(col, coreColor, smoothstep(0.25, 0.04, t));     // bulge tint
+          col = mix(col, hiiColor, hii * 0.85);                      // H II splashes
+
           gl_FragColor = vec4(col, clamp(intensity * alphaGlobal, 0.0, 1.0));
         }
       `
@@ -277,6 +310,84 @@ export class GalaxyRegime extends Regime {
     this.spiralMesh = new THREE.Mesh(spiralGeom, this.spiralMat);
     this.spiralMesh.rotation.x = -Math.PI / 2;
     this.scene.add(this.spiralMesh);
+
+    // 3D bulge — small additive sphere giving the galaxy proper above/below
+    // thickness at the centre. Looks correct when the camera dips below the
+    // disk plane (otherwise the disk is paper-flat and the bulge vanishes).
+    const bulgeR = R_GAL * 0.18;
+    const bulgeGeom = new THREE.SphereGeometry(bulgeR, 48, 32);
+    const bulgeMat = new THREE.ShaderMaterial({
+      transparent: true,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+      uniforms: {
+        bulgeR: { value: bulgeR },
+        col:    { value: new THREE.Color('#fff4d0') },
+        alpha:  { value: 1 }
+      },
+      vertexShader: /* glsl */`
+        varying float vR;
+        varying vec3 vN; varying vec3 vV;
+        void main(){
+          vR = length(position);
+          vN = normalize(normalMatrix * normal);
+          vec4 p = modelViewMatrix * vec4(position, 1.0);
+          vV = normalize(-p.xyz);
+          gl_Position = projectionMatrix * p;
+        }
+      `,
+      fragmentShader: /* glsl */`
+        uniform float bulgeR, alpha;
+        uniform vec3 col;
+        varying float vR;
+        varying vec3 vN; varying vec3 vV;
+        void main(){
+          // Exponential brightness falloff from sphere centre toward surface,
+          // plus a soft Fresnel rim so the bulge has a hot edge.
+          float t = vR / bulgeR;
+          float i = exp(-t * 3.4);
+          float fres = pow(1.0 - abs(dot(normalize(vN), normalize(vV))), 1.6);
+          float a = clamp(i * 0.55 + fres * 0.35, 0.0, 1.0);
+          gl_FragColor = vec4(col * (0.7 + 0.6 * fres), a * alpha);
+        }
+      `
+    });
+    this.bulgeMesh = new THREE.Mesh(bulgeGeom, bulgeMat);
+    this.bulgeMat = bulgeMat;
+    this.scene.add(this.bulgeMesh);
+
+    // Spherical halo of population-II stars — old, redder, scattered above
+    // and below the disk plane. Real spirals have a dim spheroidal halo
+    // visible against the dark sky; without it the galaxy looks like a
+    // sharp disc with nothing around it.
+    const HALO_STARS = 1200;
+    const haloPositions = new Float32Array(HALO_STARS * 3);
+    const haloColors    = new Float32Array(HALO_STARS * 3);
+    for (let i = 0; i < HALO_STARS; i++) {
+      // Power-law radial distribution, slightly flattened along disk plane
+      const rr = R_GAL * (0.4 + Math.pow(rng(), 1.5) * 1.4);
+      const u = rng() * 2 - 1;
+      const theta = rng() * Math.PI * 2;
+      const sR = Math.sqrt(1 - u * u);
+      haloPositions[i*3+0] = rr * sR * Math.cos(theta);
+      haloPositions[i*3+1] = rr * u * 0.55;            // flattened
+      haloPositions[i*3+2] = rr * sR * Math.sin(theta);
+      // Reddened pop-II colours — old metal-poor stars
+      const c = new THREE.Color().setHSL(0.06 + rng() * 0.04, 0.55, 0.5 + rng() * 0.18);
+      haloColors[i*3+0] = c.r; haloColors[i*3+1] = c.g; haloColors[i*3+2] = c.b;
+    }
+    const haloGeom = new THREE.BufferGeometry();
+    haloGeom.setAttribute('position', new THREE.BufferAttribute(haloPositions, 3));
+    haloGeom.setAttribute('color',    new THREE.BufferAttribute(haloColors, 3));
+    const haloStarsMat = new THREE.PointsMaterial({
+      size: 0.09, sizeAttenuation: true,
+      vertexColors: true, transparent: true,
+      depthWrite: false, opacity: 0.7,
+      blending: THREE.AdditiveBlending,
+      map: radialGlow(64, '#ffffff', '#ffd0a0', 'rgba(0,0,0,0)')
+    });
+    this.haloStars = new THREE.Points(haloGeom, haloStarsMat);
+    this.scene.add(this.haloStars);
 
     // Stars — points with per-vertex color
     this.starGeom = new THREE.BufferGeometry();
@@ -620,6 +731,11 @@ export class GalaxyRegime extends Regime {
     // Disk toggle — when off, just the stars + BHs are visible (much more
     // legible from below the galactic plane).
     this.spiralMesh.visible = ctx.diskOn && galaxyAlpha > 0.01;
+    // Bulge + halo stars fade in with the disk
+    this.bulgeMesh.visible = ctx.diskOn && galaxyAlpha > 0.01;
+    this.bulgeMat.uniforms.alpha.value = galaxyAlpha;
+    this.haloStars.visible = ctx.diskOn && galaxyAlpha > 0.01;
+    (this.haloStars.material as THREE.PointsMaterial).opacity = 0.55 * galaxyAlpha;
     for (const b of this.bhs) b.mesh.tick(this.time);
 
     // BH-BH gravity (stellar BHs orbit the central SMBH and feel each
