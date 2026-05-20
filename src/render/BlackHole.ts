@@ -18,6 +18,7 @@ export class BlackHole extends THREE.Group {
   photonRing: THREE.Mesh;
   disk: THREE.Mesh;
   private uniforms: Record<string, THREE.IUniform>;
+  private ringUniforms: Record<string, THREE.IUniform>;
 
   constructor(opts: BlackHoleOptions) {
     super();
@@ -33,13 +34,27 @@ export class BlackHole extends THREE.Group {
     this.horizon = new THREE.Mesh(horizonGeom, horizonMat);
     this.add(this.horizon);
 
-    // Photon ring — thin emissive shell with Fresnel-edged transparency
+    // Photon ring — thin emissive shell with Fresnel-edged transparency.
+    // The ring brightness is gated by the paper's strong-field lapse
+    // N² = q at the horizon surface. q(r=r_s) → 0 ⇒ N → 0 ⇒ infinite
+    // blueshift / static-frame freezing; the ring is the surface where
+    // the Fresnel projection sees q → 0 from outside. We therefore
+    // modulate by `localQ` (1 = far-field vacuum, 0 = on the horizon).
+    // For an isolated BH localQ stays at 0 at the horizon; when this
+    // BH is near another massive object the surrounding q already
+    // depletes from the neighbour's drain (set externally each frame),
+    // damping the ring brightness — a visible coupling to N²=q.
     const ringGeom = new THREE.SphereGeometry(r * 1.05, 64, 48);
     const ringMat = new THREE.ShaderMaterial({
       transparent: true,
       blending: THREE.AdditiveBlending,
       depthWrite: false,
-      uniforms: { color: { value: new THREE.Color('#ffd9a8') } },
+      uniforms: {
+        color:  { value: new THREE.Color('#ffd9a8') },
+        // Far-field q at this BH's surroundings. 1 = isolated, lower
+        // values shrink ring brightness (capacity already drained).
+        localQ: { value: 1.0 }
+      },
       vertexShader: /* glsl */`
         varying vec3 vN; varying vec3 vV;
         void main(){
@@ -51,15 +66,23 @@ export class BlackHole extends THREE.Group {
       `,
       fragmentShader: /* glsl */`
         uniform vec3 color;
+        uniform float localQ;
         varying vec3 vN; varying vec3 vV;
         void main(){
           float f = 1.0 - abs(dot(normalize(vN), normalize(vV)));
           float ring = pow(f, 5.0);
-          gl_FragColor = vec4(color, ring * 2.6);
+          // Far-field q damps the ring: when the surroundings are
+          // already drained (nearby companion) the photon ring fades —
+          // paper §strong-field lapse N²=q applied to the ring photons.
+          // Multiplier dropped from 2.6 → 1.8 so the SMBH doesn't drown
+          // out the stars / solar systems orbiting it.
+          float lapse = clamp(localQ, 0.05, 1.0);
+          gl_FragColor = vec4(color, ring * 1.8 * lapse);
         }
       `
     });
     this.photonRing = new THREE.Mesh(ringGeom, ringMat);
+    this.ringUniforms = ringMat.uniforms;
     this.add(this.photonRing);
 
     // Accretion disk — flat ring with hot-spot shader and Doppler asymmetry
@@ -139,5 +162,12 @@ export class BlackHole extends THREE.Group {
 
   tick(time: number) {
     (this.uniforms.time as { value: number }).value = time;
+  }
+
+  // Set the far-field capacity q(r→∞) at this BH's location. Drives
+  // the photon ring's N²=q lapse term — when neighbouring BHs have
+  // already drained the surroundings, the ring dims.
+  setLocalQ(q: number) {
+    (this.ringUniforms.localQ as { value: number }).value = q;
   }
 }

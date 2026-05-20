@@ -61,6 +61,8 @@ export function bindUI(cb: UICallbacks) {
 
   sliderTime.addEventListener('input', () => {
     cb.state.scrub = parseFloat(sliderTime.value);
+    // Manually scrubbing exits log-pace — user is taking direct control.
+    cb.state.logPace = false;
     cb.onChange();
   });
   sliderZoom.addEventListener('input', () => {
@@ -70,8 +72,10 @@ export function bindUI(cb: UICallbacks) {
   sliderSpeed.addEventListener('input', () => {
     cb.state.speedExp = parseFloat(sliderSpeed.value);
     // Adjusting the speed slider implies "I want to play at this speed";
-    // unpause if paused so the new speed is visible.
+    // unpause if paused so the new speed is visible. Also drops out of
+    // log-pace mode — manual speed override always wins.
     if (!cb.state.playing) cb.state.playing = true;
+    cb.state.logPace = false;
     paintTransport();
     cb.onChange();
   });
@@ -93,12 +97,14 @@ export function bindUI(cb: UICallbacks) {
     cb.onChange();
   });
 
-  // Speed preset chips (snap the slider to a named rate)
+  // Speed preset chips (snap the slider to a named rate). Manual chip
+  // selection also drops out of log-pace mode.
   chips.forEach(ch => {
     ch.addEventListener('click', () => {
       const v = parseFloat(ch.dataset.exp ?? '');
       cb.state.speedExp = v;
       cb.state.playing = true;
+      cb.state.logPace = false;
       sliderSpeed.value = String(v);
       paintTransport();
       cb.onChange();
@@ -133,17 +139,21 @@ export function bindUI(cb: UICallbacks) {
     cb.onChange();
   });
 
-  // ↺ Big Bang — reset cosmic time to 0, slow the speed so the first
-  // Gyr of structure formation unfolds visibly, play forward.
+  // ↺ Big Bang — reset cosmic time to 0 and engage log-pace playback
+  // so the early universe (inflation flash → recombination → first
+  // stars → galaxies) takes ~35 wall-sec to traverse. Each cosmic
+  // decade gets roughly equal screen time. Also snaps to mid-COSMIC
+  // zoom so you're framed on the whole cosmic web.
   const btnBang = document.getElementById('btn-bigbang') as HTMLButtonElement | null;
   if (btnBang) {
     btnBang.addEventListener('click', () => {
       cb.state.scrub = 0;
-      cb.state.speedExp = 13.0;        // ≈ Myr/s — slow enough for the early universe to read
+      cb.state.zoom = 0.10;           // mid-COSMIC band
       cb.state.direction = 1;
       cb.state.playing = true;
+      cb.state.logPace = true;
       sliderTime.value  = String(cb.state.scrub);
-      sliderSpeed.value = String(cb.state.speedExp);
+      sliderZoom.value  = String(cb.state.zoom);
       paintTransport();
       cb.onChange();
     });

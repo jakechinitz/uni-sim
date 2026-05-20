@@ -23,13 +23,18 @@ export class ManyPasts {
   group = new THREE.Group();
   private ghosts: Map<string, Ghost[]> = new Map();
   private texture: THREE.Texture;
+  private color: THREE.Color;
   private ghostsPerBody = 4;
   private maxRadius = 1.0;     // scene-unit spread of ghost cloud
 
   constructor(color = new THREE.Color(0x9b8dff), maxRadius = 1.0) {
     this.maxRadius = maxRadius;
-    this.texture = radialGlow(128, 'rgba(255,255,255,1)', `rgba(155,141,255,0.7)`, `rgba(80,40,220,0)`);
-    void color;
+    this.color = color.clone();
+    // Build mid/outer rim tints from the caller's colour so cosmic / galaxy /
+    // system ghosts read distinctly (cosmic-violet vs galaxy-cyan etc.).
+    const mid  = `rgba(${Math.round(color.r * 255)},${Math.round(color.g * 255)},${Math.round(color.b * 255)},0.7)`;
+    const edge = `rgba(${Math.round(color.r * 120)},${Math.round(color.g * 80)},${Math.round(color.b * 220)},0)`;
+    this.texture = radialGlow(128, 'rgba(255,255,255,1)', mid, edge);
   }
 
   // Update ghost positions toward the given body positions, with each
@@ -50,7 +55,7 @@ export class ManyPasts {
         for (let i = 0; i < this.ghostsPerBody; i++) {
           const mat = new THREE.SpriteMaterial({
             map: this.texture,
-            color: 0x9b8dff,
+            color: this.color,
             blending: THREE.AdditiveBlending,
             transparent: true,
             depthWrite: false,

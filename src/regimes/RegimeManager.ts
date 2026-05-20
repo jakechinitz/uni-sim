@@ -10,6 +10,8 @@ import { Regime } from './Regime';
 import { CosmicRegime }    from './CosmicRegime';
 import { GalaxyRegime }    from './GalaxyRegime';
 import { SystemRegime }    from './SystemRegime';
+import { PlanetRegime }    from './PlanetRegime';
+import { AtomicRegime }    from './AtomicRegime';
 import { SubstrateRegime } from './SubstrateRegime';
 import { decodeZoom, RegimeKey } from '../core/Camera';
 import { Composer } from '../render/Composer';
@@ -20,6 +22,8 @@ const REGISTRY: Record<RegimeKey, Ctor> = {
   COSMIC:    CosmicRegime,
   GALAXY:    GalaxyRegime,
   SYSTEM:    SystemRegime,
+  PLANET:    PlanetRegime,
+  ATOMIC:    AtomicRegime,
   SUBSTRATE: SubstrateRegime,
 };
 
@@ -28,6 +32,8 @@ function focusContextFor(key: RegimeKey, f: FocusState): string {
     case 'COSMIC':    return '';
     case 'GALAXY':    return f.galaxyId ?? '';
     case 'SYSTEM':    return `${f.galaxyId ?? ''}|${f.starId ?? ''}`;
+    case 'PLANET':    return `${f.galaxyId ?? ''}|${f.starId ?? ''}|${f.planetId ?? ''}`;
+    case 'ATOMIC':    return '';
     case 'SUBSTRATE': return '';
   }
 }
@@ -45,11 +51,15 @@ const CACHE_LIMIT = 6;
 export class RegimeManager {
   current!: Regime;
   currentKey: RegimeKey = 'COSMIC';
-  focus: FocusState = { galaxyId: null, starId: null };
+  focus: FocusState = { galaxyId: null, starId: null, planetId: null };
   // App attaches this to swap OrbitControls onto the new camera whenever
   // the active regime changes.
   onRegimeChange?: (regime: Regime, key: RegimeKey) => void;
   private currentFocusCtx = '';
+  // Pinned-focus map: { 'galaxyId' | 'starId' | 'planetId' → wall-time-pin }
+  // pumpFocus() leaves a pinned field untouched. Pins are cleared on
+  // explicit unpin (background click, regime change wipes child pins).
+  private pinned = new Set<keyof FocusState>();
   // LRU cache: cacheKey → {regime, lastUsed}. Recreating GalaxyRegime is
   // expensive (BH shaders, 6k star buffer, spiral mesh), so we cache rather
   // than dispose-and-rebuild on every zoom ping-pong.
@@ -66,7 +76,8 @@ export class RegimeManager {
 
   setSeed(seed: number) {
     this.seed = seed;
-    this.focus = { galaxyId: null, starId: null };
+    this.focus = { galaxyId: null, starId: null, planetId: null };
+    this.pinned.clear();
     // Seed change invalidates the whole cache (every regime would need
     // rebuilding against the new base seed anyway)
     for (const entry of this.cache.values()) entry.regime.dispose();
@@ -76,7 +87,21 @@ export class RegimeManager {
   }
 
   resetFocus() {
-    this.focus = { galaxyId: null, starId: null };
+    this.focus = { galaxyId: null, starId: null, planetId: null };
+    this.pinned.clear();
+  }
+
+  // Lock a single focus field to a chosen value. pumpFocus() will leave
+  // pinned fields alone, so the user's selection survives camera moves.
+  pinFocus(field: keyof FocusState, value: string | null) {
+    this.focus[field] = value;
+    if (value !== null) this.pinned.add(field);
+    else this.pinned.delete(field);
+    // Crossing focus committed → rebuild on next setZoom call.
+  }
+
+  unpinAll() {
+    this.pinned.clear();
   }
 
   // Called per frame. Commits focus from the outgoing regime when crossing
@@ -106,8 +131,11 @@ export class RegimeManager {
 
   private applyFocus(p: Partial<FocusState> | null) {
     if (!p) return;
-    if (p.galaxyId !== undefined) this.focus.galaxyId = p.galaxyId;
-    if (p.starId   !== undefined) this.focus.starId   = p.starId;
+    // Pinned fields are user-selected — never overwrite from the
+    // camera-ray fallback published by regimes.
+    if (p.galaxyId !== undefined && !this.pinned.has('galaxyId')) this.focus.galaxyId = p.galaxyId;
+    if (p.starId   !== undefined && !this.pinned.has('starId'))   this.focus.starId   = p.starId;
+    if (p.planetId !== undefined && !this.pinned.has('planetId')) this.focus.planetId = p.planetId;
   }
 
   resize(w: number, h: number) {
@@ -124,7 +152,7 @@ export class RegimeManager {
       seed: this.seed, time: 0, zoomIntra: 0, edePulse: 0,
       entanglementOn: false, diskOn: true, manyPastsOn: false, dtWall: 0, rate: 0,
       focus: this.focus
-    }));
+    }), 0.70, 0.22);
     this.composer.render(dt);
   }
 

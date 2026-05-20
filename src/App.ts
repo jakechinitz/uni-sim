@@ -23,6 +23,8 @@ const REGIME_LIMITS: Record<RegimeKey, { min: number; max: number }> = {
   COSMIC:    { min: 12,  max: 200 },
   GALAXY:    { min: 5,   max: 80  },
   SYSTEM:    { min: 35,  max: 550 },
+  PLANET:    { min: 1.5, max: 6   },
+  ATOMIC:    { min: 6,   max: 22  },
   SUBSTRATE: { min: 6,   max: 45  },
 };
 
@@ -51,7 +53,11 @@ export class App {
     // far away. ACESFilmic compresses the high end so we can crank the
     // light intensity without losing detail.
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    this.renderer.toneMappingExposure = 1.05;
+    // Bumped from 1.05 — galaxies and the cosmic web were reading too
+    // dark without bloom, and bloom made the bright cores wash out
+    // everything else. 1.25 lifts the midtones into a legible range
+    // while ACES still compresses the highlights.
+    this.renderer.toneMappingExposure = 1.25;
     this.resize();
 
     // Pristine state, then overlay any save
@@ -63,6 +69,7 @@ export class App {
     this.clock.speedExp  = this.state.speedExp;
     this.clock.direction = this.state.direction;
     this.clock.playing   = this.state.playing;
+    this.clock.useLogPace = this.state.logPace ?? false;
 
     // Dummy scene/camera for composer init
     const dummyScene = new THREE.Scene();
@@ -85,11 +92,23 @@ export class App {
       (i) => this.regimes.hoverInfo(i)
     );
     this.drag.onHover = (info, x, y) => updateHoverCard(info, x, y);
-    // Click a draggable → pin its hover card so you can see what you'd
-    // drill into. Click empty canvas (no drag) → unpin.
-    this.drag.onClickTarget = (info, _target, x, y) => pinHoverCard(info, x, y);
-    this.drag.onClickBackground = () => unpinHoverCard();
-    window.addEventListener('keydown', (ev) => { if (ev.key === 'Escape') unpinHoverCard(); });
+    // Click a draggable → pin its hover card AND pin its focus so the
+    // next zoom-in commits on the thing you clicked, not whatever the
+    // camera ray happens to point at. Background click clears both.
+    this.drag.onClickTarget = (info, target, x, y) => {
+      pinHoverCard(info, x, y);
+      this.applyClickFocus(target.id);
+    };
+    this.drag.onClickBackground = () => {
+      unpinHoverCard();
+      this.regimes.unpinAll();
+    };
+    window.addEventListener('keydown', (ev) => {
+      if (ev.key === 'Escape') {
+        unpinHoverCard();
+        this.regimes.unpinAll();
+      }
+    });
 
     // Install OrbitControls on the initial regime and re-install on every
     // regime swap so the controls track whichever camera is active.
@@ -103,20 +122,22 @@ export class App {
     bindUI({
       state: this.state,
       onChange: () => {
-        this.clock.scrub     = this.state.scrub;
-        this.clock.speedExp  = this.state.speedExp;
-        this.clock.direction = this.state.direction;
-        this.clock.playing   = this.state.playing;
+        this.clock.scrub      = this.state.scrub;
+        this.clock.speedExp   = this.state.speedExp;
+        this.clock.direction  = this.state.direction;
+        this.clock.playing    = this.state.playing;
+        this.clock.useLogPace = this.state.logPace ?? false;
         this.regimes.setZoom(this.state.zoom);
         this.composer.enableBloom(this.state.toggles.bloom);
         autosave(this.state);
       },
       onLoad: (data) => {
         this.state = data;
-        this.clock.scrub     = data.scrub;
-        this.clock.speedExp  = data.speedExp;
-        this.clock.direction = data.direction;
-        this.clock.playing   = data.playing;
+        this.clock.scrub      = data.scrub;
+        this.clock.speedExp   = data.speedExp;
+        this.clock.direction  = data.direction;
+        this.clock.playing    = data.playing;
+        this.clock.useLogPace = data.logPace ?? false;
         this.regimes.setSeed(data.seed);          // also resets focus
         this.regimes.setZoom(data.zoom);
         this.composer.enableBloom(data.toggles.bloom);
@@ -128,10 +149,11 @@ export class App {
         this.state.seed  = newSeed;
         this.state.scrub = 0;
         this.state.zoom  = 0.07;
-        this.state.overrides = {};
+        this.state.logPace = false;
         this.regimes.setSeed(newSeed);            // also resets focus
         this.regimes.setZoom(this.state.zoom);
         this.clock.scrub = 0;
+        this.clock.useLogPace = false;
         syncControls(this.state);
         this.composer.flash(1.0);
         this.prevTime = 1; // ensure bang flash next frame
@@ -152,6 +174,22 @@ export class App {
     });
 
     this.loop();
+  }
+
+  // Convert a clicked draggable's id into a focus pin on the right
+  // field for the current regime. Galaxies pin the cosmic-web focus;
+  // stars pin the galactic focus; planets pin the system focus.
+  // BH clicks at GALAXY scale don't pin starId (BHs aren't stars; the
+  // hover card pin is still useful but a drill-in needs a real star).
+  // Defects and unrecognised ids fall through harmlessly.
+  private applyClickFocus(id: string) {
+    if (id.startsWith('gx-')) {
+      this.regimes.pinFocus('galaxyId', id);
+    } else if (id.startsWith('st-')) {
+      this.regimes.pinFocus('starId', id);
+    } else if (id.startsWith('p-')) {
+      this.regimes.pinFocus('planetId', id);
+    }
   }
 
   private resize() {
@@ -236,6 +274,13 @@ export class App {
     this.state.scrub     = this.clock.scrub;
     this.state.direction = this.clock.direction;
     this.state.playing   = this.clock.playing;
+    this.state.logPace   = this.clock.useLogPace;
+    // Push log-pace-advanced scrub back to the slider so the user sees
+    // the play head moving through the time epochs.
+    if (this.clock.useLogPace) {
+      const sl = document.getElementById('slider-time') as HTMLInputElement | null;
+      if (sl) sl.value = String(this.state.scrub);
+    }
 
     const tGyr = this.clock.time;
     // Big-bang flash whenever we arrive at t≈0 from elsewhere
@@ -291,7 +336,9 @@ export class App {
     setHud({
       time:  `${tLabel} · ${zLabel} · ${ep.label}`,
       zoom:  `${slice.regime} ▸ ${slice.intra.toFixed(2)}`,
-      speed: formatRate(this.clock.speed),
+      speed: this.clock.useLogPace
+        ? `log-pace · ${this.clock.logPaceWallSec}s sweep`
+        : formatRate(this.clock.speed),
       epoch: ep.label
     });
 

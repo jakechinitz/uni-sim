@@ -16,8 +16,12 @@ export interface SaveData {
   speedExp: number;       // log10 of forward sim_sec/wall_sec
   direction: 1 | -1;      // +1 forward, -1 rewind (separate from speedExp)
   playing: boolean;       // play/pause state (separate from speed/direction)
+  // logPace: when true the Big Bang flow walks the time slider linearly
+  // so the exponential scrub map spreads the early universe across
+  // ~35 wall-sec. Resets to false the moment the user touches the
+  // speed slider or a preset chip.
+  logPace?: boolean;
   toggles: { entangle: boolean; bloom: boolean; disk: boolean; manyPasts: boolean };
-  overrides: Record<string, [number, number, number, number, number, number]>;
 }
 
 let saveTimer: number | null = null;
@@ -72,7 +76,7 @@ export function emptySave(seed: number): SaveData {
     speedExp: SPEED_EXP_DEFAULT,
     direction: 1,
     playing: true,
-    toggles: { entangle: false, bloom: true, disk: true, manyPasts: false },
-    overrides: {}
+    logPace: false,
+    toggles: { entangle: false, bloom: true, disk: true, manyPasts: false }
   };
 }

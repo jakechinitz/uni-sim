@@ -3,7 +3,19 @@
 export const G   = 6.674e-11;   // SI Newton constant (RAR strong-field limit)
 export const c   = 2.998e8;     // m/s
 export const H0  = 2.18e-18;    // Hubble today, s^-1 (~67 km/s/Mpc)
-export const a0  = 1.2e-10;     // m/s^2 - galactic acceleration scale; paper's g_share,eff·cH0/(4π²)
+
+// Paper-derived structure invariants
+export const TET_FACES   = 4;
+export const FACE_STATES = 7;
+export const TET_MICROSTATES = 1680;
+export const G_SHARE_EFF = 7.42;
+
+// a₀ derived from the paper's closure: a₀ = g_share,eff · cH₀ / (4π²)
+// (paper §14, no fit). Comes out to ~1.06×10⁻¹⁰ m/s² — within 12% of
+// McGaugh's empirical 1.2×10⁻¹⁰. Used everywhere instead of the old
+// hardcoded value so the live sim, the Closure panel, and the paper
+// all agree on a single number.
+export const a0 = (G_SHARE_EFF / (4 * Math.PI * Math.PI)) * c * H0;
 
 export const M_SUN = 1.989e30;  // kg
 export const M_EARTH = 5.972e24;
@@ -14,12 +26,6 @@ export const AU    = 1.496e11;
 export const LY    = 9.461e15;
 export const GYR   = 3.156e16;  // s
 export const T_UNIV = 13.8;     // Gyr, paper
-
-// Paper-derived structure invariants
-export const TET_FACES   = 4;
-export const FACE_STATES = 7;
-export const TET_MICROSTATES = 1680;
-export const G_SHARE_EFF = 7.42;
 
 // Cosmology
 export const Z_EQ        = 3400;      // matter-radiation equality, where EDE pulse fires

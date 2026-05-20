@@ -111,16 +111,14 @@ export class PlanetRegime extends Regime {
 
   update(ctx: RegimeContext, dt: number): void {
     // dt is sim seconds. Clamp the visual step so fast-forward doesn't yeet
-    // the rotation. Wall-time drives the camera so it stays alive when paused.
+    // the rotation.
     const visDt = Math.min(0.5, Math.abs(dt)) * Math.sign(dt || 1);
     this.time += visDt;
     this.wallTime += ctx.dtWall;
     this.cloudShader.uniforms.time.value = this.time;
-    this.planet.rotation.y += visDt * 0.05;
+    this.planet.rotation.y += Math.max(visDt * 0.05, ctx.dtWall * 0.04);
     this.atmosphere.rotation.y = this.planet.rotation.y;
-    const phi = this.wallTime * 0.06;
-    this.camera.position.set(Math.sin(phi) * 3.0, 0.6, Math.cos(phi) * 3.0);
-    this.camera.lookAt(0, 0, 0);
+    // Camera owned by OrbitControls — don't touch.
   }
 
   bloomStrength(_ctx: RegimeContext): number { return 0.5; }
