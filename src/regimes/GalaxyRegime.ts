@@ -132,11 +132,19 @@ export class GalaxyRegime extends Regime {
       const diskInner = (2.0 + rng() * 1.2) * diskScale;
       const diskOuter = diskInner + (3.5 + rng() * 5.0);
       const tilt      = (rng() - 0.5) * Math.PI * 0.8;
-      // Active vs aged: hotter disks for younger SMBHs
-      const active    = rng();
-      const hot   = active > 0.5 ? new THREE.Color('#fff4d8') : new THREE.Color('#ffd0a0');
-      const mid   = active > 0.5 ? new THREE.Color('#ffaa55') : new THREE.Color('#ff8060');
-      const cool  = active > 0.5 ? new THREE.Color('#7ad7ff') : new THREE.Color('#a060ff');
+      // Palette driven by SMBH mass via Shakura-Sunyaev disk-temperature
+      // scaling: T_eff ∝ M^(-1/4) at the inner stable orbit. Smaller
+      // SMBHs run hotter and bluer; massive SMBHs run cooler and redder
+      // / purpler. logM range [5.5, 9.5] maps linearly to "heat" ∈ [0,1]:
+      //   heat = 1 → small (~10⁵·⁵ M☉) → blue-white outer disk
+      //   heat = 0 → massive (~10⁹·⁵ M☉) → warm purple outer disk
+      // Inner-disk peak temp is always white-yellow plasma (hot color).
+      const heat = Math.max(0, Math.min(1, (9.5 - logM) / 4));
+      const lerpHex = (aHex: string, bHex: string, t: number) =>
+        new THREE.Color(aHex).lerp(new THREE.Color(bHex), t);
+      const hot  = new THREE.Color('#fff4d8');
+      const mid  = lerpHex('#ff7050', '#ffaa55', heat);   // massive → warm-red; small → yellow-orange
+      const cool = lerpHex('#a060ff', '#7ad7ff', heat);   // massive → purple; small → cyan-blue
       const mesh = new BlackHole({
         radius, diskInner, diskOuter, diskTilt: tilt, hot, mid, cool
       });
