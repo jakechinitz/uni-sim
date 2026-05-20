@@ -130,10 +130,12 @@ export class GalaxyRegime extends Regime {
       // and M87-class BHs
       const logM = 5.5 + rng() * 4.0;   // log10(M / M☉) ∈ [5.5, 9.5]
       const massSolar = Math.pow(10, logM);
-      // Map physical mass to sim units (visible disk size). Use a gentle log scale
-      // so even dwarfs are visible.
+      // Visual radius shrunk to ~55% of the earlier mapping so the BH
+      // sits in a richer surrounding field rather than dominating the
+      // composition. The q-shell + photon ring + ambient haze all scale
+      // off this `radius` so one number controls the whole BH footprint.
       const simMass = 200 + 2300 * (logM - 5.5) / 4.0;
-      const radius  = 0.20 + 0.40 * (simMass - 200) / 2300;
+      const radius  = 0.11 + 0.22 * (simMass - 200) / 2300;
       const diskScale = 0.65 + rng() * 0.7;
       const diskInner = (2.0 + rng() * 1.2) * diskScale;
       const diskOuter = diskInner + (3.5 + rng() * 5.0);
@@ -191,7 +193,7 @@ export class GalaxyRegime extends Regime {
       // Stellar BH masses 5..40 M☉ → sim mass small
       const massSolar = 5 + rng() * 35;
       const simMass   = 4 + rng() * 16;
-      const radius    = 0.06 + 0.04 * (massSolar / 40);
+      const radius    = 0.033 + 0.022 * (massSolar / 40);   // ~55% of prior scale
       const tilt      = (rng() - 0.5) * Math.PI;
       // Hotter Hawking glow for smaller BHs (T_H ∝ 1/M)
       const heat = 1 - (massSolar - 5) / 35;
@@ -325,7 +327,7 @@ export class GalaxyRegime extends Regime {
                        fbm(vec2(ang * 7.0, t * 14.0) + time * 0.07)) * arm2;
 
           // --- combined intensity ---
-          float intensity = (1.5 * bulge + disk * (0.45 + 0.85 * armStr)) * dustMod;
+          float intensity = (1.5 * bulge + disk * (0.55 + 0.95 * armStr)) * dustMod;
 
           // --- color palette by radius ---
           vec3 col = mix(edgeColor, midColor, smoothstep(0.8, 0.25, t));
@@ -408,12 +410,11 @@ export class GalaxyRegime extends Regime {
     this.starGeom.setAttribute('color', this.colAttr);
 
     this.starMaterial = new THREE.PointsMaterial({
-      // Each point is a whole solar system. Size dropped to 0.12 to
-      // pair with the 12,000-star count — denser disk, individual
-      // points stay crisp instead of merging into chunky pixels.
-      // Additive blending + ACES tonemap still composite into a
-      // continuous bright wash at zoom-out.
-      size: 0.12, sizeAttenuation: true,
+      // Each point is a whole solar system. Size 0.14 paired with the
+      // 8,000-star count gives a brighter surrounding field that
+      // balances the now-smaller BH. Additive blending + ACES tonemap
+      // still composite into a continuous bright wash at zoom-out.
+      size: 0.14, sizeAttenuation: true,
       vertexColors: true,
       transparent: true, depthWrite: false, opacity: 1.0,
       blending: THREE.AdditiveBlending,
@@ -642,7 +643,7 @@ export class GalaxyRegime extends Regime {
     // Remnant mass ≈ 30 % of initial (rest blown off in the explosion)
     const remMsun  = Math.max(3, s.mass * 0.30);
     const simMass  = 3 + (remMsun - 3) * 0.5;       // sim-mass scale
-    const radius   = 0.05 + 0.03 * (remMsun / 30);
+    const radius   = 0.028 + 0.017 * (remMsun / 30);   // ~55% of prior scale
     // Younger (hotter) BHs visually
     const hot = new THREE.Color(1, 0.95, 0.85);
     const mid = new THREE.Color(1, 0.55, 0.30);
