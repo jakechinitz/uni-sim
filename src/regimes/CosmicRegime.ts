@@ -423,6 +423,20 @@ export class CosmicRegime extends Regime {
     return { galaxyId: bestId };
   }
 
+  // Where the currently focused galaxy sits in world space (post-Hubble-
+  // flow). App lerps the OrbitControls target toward this each frame so
+  // the camera flies into the clicked galaxy as the user zooms.
+  focusedWorldPos(focus: FocusState): THREE.Vector3 | null {
+    if (!focus.galaxyId) return null;
+    const g = this.galaxies.find(g => g.id === focus.galaxyId);
+    if (!g) return null;
+    return new THREE.Vector3(
+      g.body.pos[0] * this.edeBreath,
+      g.body.pos[1] * this.edeBreath,
+      g.body.pos[2] * this.edeBreath
+    );
+  }
+
   bloomStrength(ctx: RegimeContext): number {
     return 0.55 + 0.9 * ctx.edePulse;
   }

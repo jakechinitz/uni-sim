@@ -101,6 +101,11 @@ export class RegimeManager {
     this.pinned.clear();
   }
 
+  // Any focus field explicitly pinned by the user (vs. camera-ray fallback)?
+  // App uses this to decide whether to fly the camera toward the focused
+  // thing on zoom-in — free orbit is preserved when nothing's pinned.
+  hasPin(): boolean { return this.pinned.size > 0; }
+
   // Called per frame. Commits focus from the outgoing regime when crossing
   // a regime boundary, then rebuilds against (regime, focus-mixed seed).
   setZoom(zoom: number) {

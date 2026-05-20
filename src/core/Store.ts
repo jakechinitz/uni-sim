@@ -22,7 +22,13 @@ export interface SaveData {
   // speed slider or a preset chip.
   logPace?: boolean;
   // `bloom` removed in favour of always-off; field tolerated in old saves.
-  toggles: { entangle: boolean; disk: boolean; manyPasts: boolean; bloom?: boolean };
+  toggles: {
+    entangle: boolean;
+    disk: boolean;
+    diskDetail?: boolean;   // dust lanes + HII regions + clumps; default ON
+    manyPasts: boolean;
+    bloom?: boolean;
+  };
 }
 
 let saveTimer: number | null = null;
@@ -78,6 +84,6 @@ export function emptySave(seed: number): SaveData {
     direction: 1,
     playing: true,
     logPace: false,
-    toggles: { entangle: false, disk: true, manyPasts: false }
+    toggles: { entangle: false, disk: true, diskDetail: true, manyPasts: false }
   };
 }

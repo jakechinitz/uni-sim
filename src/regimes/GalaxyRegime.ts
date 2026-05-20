@@ -234,12 +234,17 @@ export class GalaxyRegime extends Regime {
     this.haloMesh.scale.setScalar(R_GAL * 3.8);
     this.scene.add(this.haloMesh);
 
-    // Spiral background disk shader. Three structural layers:
+    // Spiral background disk shader. Three structural layers always on:
     //   - exponential bulge concentrated near the centre
     //   - exponential disk falloff in radius
     //   - 2 main log-spiral arms + 2 weaker secondary arms
-    // (Removed: dust lanes + H II regions — those were cosmetic and
-    //  don't correspond to anything in the paper.)
+    // Plus three "real galaxies have these but the paper doesn't" detail
+    // layers, gated by `detail` uniform (driven by the disk-detail UI
+    // toggle):
+    //   - dust lanes along the inner edge of each arm (offset spiral)
+    //   - pinkish HII star-forming knots along arm peaks
+    //   - knotty fBm clumping on the arms
+    // None of these affect dynamics; only the disk visual.
     const spiralGeom = new THREE.CircleGeometry(R_GAL, 160);
     this.spiralMat = new THREE.ShaderMaterial({
       transparent: true,
@@ -251,6 +256,8 @@ export class GalaxyRegime extends Regime {
         coreColor:  { value: new THREE.Color('#fff4d0') },   // bulge: warm yellow-white
         midColor:   { value: new THREE.Color('#ffc890') },   // mid-disk: warm
         edgeColor:  { value: new THREE.Color('#88b8ff') },   // outer disk: cool young blue
+        hiiColor:   { value: new THREE.Color('#ff7090') },   // HII regions: pink
+        detail:     { value: 1 },                            // 0 = flat, 1 = textured
         // Driven by cosmic time so the disk fades up as the galaxy assembles
         alphaGlobal: { value: 1 }
       },
@@ -262,35 +269,54 @@ export class GalaxyRegime extends Regime {
         }
       `,
       fragmentShader: /* glsl */`
-        uniform float time, twist, alphaGlobal;
-        uniform vec3  coreColor, midColor, edgeColor;
+        uniform float time, twist, alphaGlobal, detail;
+        uniform vec3  coreColor, midColor, edgeColor, hiiColor;
         varying vec2 vP;
+
+        float hash(vec2 p){ p=fract(p*vec2(123.34,456.21)); p+=dot(p,p+34.345); return fract(p.x*p.y); }
+        float noise(vec2 p){
+          vec2 i=floor(p), f=fract(p);
+          vec2 u=f*f*(3.0-2.0*f);
+          return mix(mix(hash(i),hash(i+vec2(1,0)),u.x),
+                     mix(hash(i+vec2(0,1)),hash(i+vec2(1,1)),u.x), u.y);
+        }
+        float fbm(vec2 p){ float v=0., a=0.5; for(int i=0;i<4;i++){ v+=a*noise(p); p*=2.07; a*=0.5; } return v; }
 
         void main(){
           float r = length(vP);
           float R = ${R_GAL.toFixed(2)};
           if (r > R || r < 0.0005) discard;
-          float t   = r / R;                            // 0..1 normalised radius
+          float t   = r / R;
           float ang = atan(vP.y, vP.x);
 
-          // --- structural intensity layers ---
-          // Bulge: sharp exponential central glow
+          // --- structural layers (always on) ---
           float bulge = exp(-t * 9.5);
-          // Disk: shallower exponential, then soft outer truncation
-          float disk = exp(-t * 2.2) * (1.0 - smoothstep(0.93, 1.0, t));
-
-          // Log-spiral arms — 2 main + 2 weaker secondary (offset phase)
-          float ph     = ang + twist * log(max(t, 0.03));
-          float arm2   = pow(0.5 + 0.5 * cos(2.0 * ph), 9.0);
-          float arm4   = pow(0.5 + 0.5 * cos(4.0 * ph + 0.7), 6.0) * 0.45;
+          float disk  = exp(-t * 2.2) * (1.0 - smoothstep(0.93, 1.0, t));
+          float ph    = ang + twist * log(max(t, 0.03));
+          float arm2  = pow(0.5 + 0.5 * cos(2.0 * ph), 9.0);
+          float arm4  = pow(0.5 + 0.5 * cos(4.0 * ph + 0.7), 6.0) * 0.45;
           float armStr = arm2 + arm4;
 
-          // Combine — bulge dominates centre, disk × arms dominate outwards
-          float intensity = 1.5 * bulge + disk * (0.45 + 0.85 * armStr);
+          // --- detail layers (gated by the 'detail' uniform) ---
+          // Dust lane: phase-shifted narrow spiral that SUBTRACTS light.
+          // Lies just inside each arm, like the dark band in real spirals.
+          float dustPh   = ph + 0.6;
+          float dustArm  = pow(0.5 + 0.5 * cos(2.0 * dustPh), 14.0);
+          float dustMod  = 1.0 - dustArm * 0.65 * smoothstep(0.02, 0.6, t) * detail;
+          // Clumpy texture along arms — noise-modulated brightness.
+          float clump = 1.0 - detail + detail * (0.6 + 0.55 * fbm(vec2(ang * 5.0, t * 11.0) + time * 0.04));
+          armStr *= clump;
+          // HII regions: bright pink star-forming knots on arm peaks.
+          float hii = detail * smoothstep(0.62, 0.86,
+                       fbm(vec2(ang * 7.0, t * 14.0) + time * 0.07)) * arm2;
 
-          // --- colour palette by radius ---
+          // --- combined intensity ---
+          float intensity = (1.5 * bulge + disk * (0.45 + 0.85 * armStr)) * dustMod;
+
+          // --- color palette by radius ---
           vec3 col = mix(edgeColor, midColor, smoothstep(0.8, 0.25, t));
-          col = mix(col, coreColor, smoothstep(0.25, 0.04, t));     // bulge tint
+          col = mix(col, coreColor, smoothstep(0.25, 0.04, t));
+          col = mix(col, hiiColor, hii * 0.85);
 
           gl_FragColor = vec4(col, clamp(intensity * alphaGlobal, 0.0, 1.0));
           // suppress unused-uniform warning
@@ -680,6 +706,7 @@ export class GalaxyRegime extends Regime {
     const tG = ctx.time;          // Gyr
     const galaxyAlpha = Math.min(1, Math.max(0, (tG - 0.1) / 2.0));
     this.spiralMat.uniforms.alphaGlobal.value = galaxyAlpha;
+    this.spiralMat.uniforms.detail.value = ctx.diskDetailOn ? 1 : 0;
     // Bumped baseline from 0.15 — at low galaxyAlpha (early in cosmic time
     // or as a freshly-mounted regime) stars were so faint that with bloom
     // off the disk looked empty. 0.45 lets the dimmest unborn stars still
@@ -1041,6 +1068,16 @@ export class GalaxyRegime extends Regime {
     }
     if (bestI < 0) return null;
     return { starId: `st-${bestI}` };
+  }
+
+  // World position of the focused star (if any) so the App can lerp the
+  // camera target toward it as the user zooms in from GALAXY → SYSTEM.
+  focusedWorldPos(focus: FocusState): THREE.Vector3 | null {
+    if (!focus.starId) return null;
+    const idx = parseInt(focus.starId.replace('st-', ''), 10);
+    const s = this.stars[idx];
+    if (!s) return null;
+    return new THREE.Vector3(s.body.pos[0], s.body.pos[1], s.body.pos[2]);
   }
 
   pick(intersection: THREE.Intersection): DragTarget | null {

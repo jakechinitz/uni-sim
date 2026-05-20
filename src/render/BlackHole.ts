@@ -129,13 +129,33 @@ export class BlackHole extends THREE.Group {
           } else {
             // Photon ring: peaks at b ≈ b_c (the Schwarzschild critical
             // impact parameter where unstable null orbits pile up).
-            float ringWidth  = 0.35 * rs;
+            // Slightly blended into the surrounding haze so it reads as
+            // a luminous structure, not a neon outline — real EHT images
+            // show a crescent-ish brightness profile (relativistic
+            // beaming of the orbiting accretion plasma), not a uniform
+            // ring. We don't simulate beaming proper, but approximate it
+            // with an azimuthal modulation around the screen-projected
+            // BH centre so the ring is brighter on one side, dimmer on
+            // the other.
+            float ringWidth  = 0.40 * rs;
             float photonRing = exp(-pow((b - bcR) / ringWidth, 2.0));
+            // Azimuthal phase of this fragment relative to the screen-
+            // projected BH axis. We project the offset onto the camera's
+            // right/up basis vectors built from rayDir × world-up.
+            vec3 up    = vec3(0.0, 1.0, 0.0);
+            vec3 right = normalize(cross(rayDir, up));
+            vec3 upS   = cross(right, rayDir);
+            vec3 off   = closest - bhCenter;
+            float azim = atan(dot(off, upS), dot(off, right));
+            // Doppler-ish asymmetry — one side brighter than the other.
+            // 25 % swing, soft sinusoid plus a touch of higher harmonic
+            // so it doesn't look like a perfect cosine envelope.
+            float beam = 0.78 + 0.22 * sin(azim) + 0.06 * sin(azim * 2.3 + 1.1);
             // 1/r² ambient tail outside the ring
-            float ambient    = pow(rs / b, 1.6) * 0.10;
-            float intensity  = (photonRing * 1.6 + ambient) * localQ;
+            float ambient   = pow(rs / b, 1.6) * 0.12;
+            float intensity = (photonRing * 1.05 * beam + ambient) * localQ;
             if (intensity < 0.005) discard;
-            vec3  col = mix(coolColor, hotColor, smoothstep(bcR * 1.4, bcR, b));
+            vec3 col = mix(coolColor, hotColor, smoothstep(bcR * 1.4, bcR, b));
             gl_FragColor = vec4(col * intensity, intensity);
           }
         }
