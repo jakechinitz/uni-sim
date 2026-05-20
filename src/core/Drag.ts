@@ -83,10 +83,20 @@ export class DragController {
     return p;
   }
 
+  // Threshold for Points-cloud raycasts must scale with camera distance,
+  // otherwise tiny attenuated stars are impossible to click when zoomed
+  // out and trivially grabbable when zoomed in. ≈1.5% of camera distance
+  // is roughly one screen-space pixel of slop.
+  private setPointsThreshold(cam: THREE.Camera) {
+    const camDist = cam.position.length();
+    this.raycaster.params.Points = { threshold: Math.max(0.04, camDist * 0.015) };
+  }
+
   private onDown = (ev: PointerEvent) => {
     if (ev.button !== 0) return;
     this.setNdc(ev);
     const cam = this.getCurrentCamera();
+    this.setPointsThreshold(cam);
     this.raycaster.setFromCamera(this.pointerNdc, cam);
     const group = this.getDraggables();
     const hits = this.raycaster.intersectObjects(group.children, true);
@@ -161,6 +171,7 @@ export class DragController {
     }
     // Hover preview (no pending, no active)
     const cam = this.getCurrentCamera();
+    this.setPointsThreshold(cam);
     this.raycaster.setFromCamera(this.pointerNdc, cam);
     const hits = this.raycaster.intersectObjects(this.getDraggables().children, true);
     const hit = hits[0];

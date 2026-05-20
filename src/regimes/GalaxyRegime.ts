@@ -79,6 +79,11 @@ export class GalaxyRegime extends Regime {
   private focusReticle!: THREE.Sprite;
   private time = 0;
   private wallTime = 0;
+  // Magnetic cursor support: pick() updates these when a star is under
+  // the pointer; update() lerps the picked sprite onto that star and
+  // fades it once the hover stops being refreshed.
+  private hoveredStarIdx = -1;
+  private hoveredAtWall  = -10;
   private telegrapher = new TelegrapherField(2.0, new THREE.Color(0x9ee0ff));
   private manyPasts = new ManyPasts(new THREE.Color(0x9b8dff), 2.5);
   // Supernova flare pool — when a massive star dies it spawns one of
@@ -349,7 +354,12 @@ export class GalaxyRegime extends Regime {
       map: radialGlow(64, '#ffffff', '#ffe0c0', 'rgba(0,0,0,0)')
     });
     this.points = new THREE.Points(this.starGeom, this.starMaterial);
+    this.points.userData = { type: 'starcloud' };
     this.scene.add(this.points);
+    // Stars are clickable for focus-pin (drill into THIS star's system).
+    // Adding the Points cloud to the draggable group lets Drag.ts raycast
+    // hit individual stars; pick() below resolves intersection.index → star.
+    this.draggable.add(this.points);
 
     // Single "picked star" sprite that flies under the cursor when grabbing a star
     this.picked = new THREE.Sprite(new THREE.SpriteMaterial({
@@ -850,19 +860,32 @@ export class GalaxyRegime extends Regime {
       ctx.manyPastsOn
     );
 
-    // Focus reticle — only shown when zoom is in the second half of the
-    // GALAXY band (i.e. user is about to drill into a star). At low intra
-    // the reticle just clutters the view, especially when stars are bunched
-    // near the BH and it appears to "blink" between them.
-    const showReticle = ctx.zoomIntra > 0.5 && !!ctx.focus.starId;
+    // Picker sprite — magnetic cursor that hovers onto the star
+    // currently under the pointer. Fades when no fresh hover (set in
+    // pick() each pointer event).
+    const hoverFresh = (this.wallTime - this.hoveredAtWall) < 0.12;
+    const pickerMat = this.picked.material as THREE.SpriteMaterial;
+    if (hoverFresh && this.hoveredStarIdx >= 0 && this.hoveredStarIdx < this.stars.length) {
+      const s = this.stars[this.hoveredStarIdx];
+      this.picked.position.set(s.body.pos[0], s.body.pos[1], s.body.pos[2]);
+      pickerMat.opacity += (0.85 - pickerMat.opacity) * Math.min(1, ctx.dtWall * 12);
+    } else {
+      pickerMat.opacity += (0 - pickerMat.opacity) * Math.min(1, ctx.dtWall * 6);
+    }
+
+    // Focus reticle — shows whenever a star is focused (camera-ray
+    // fallback OR pinned-by-click). Brighter once zoom enters the
+    // second half of the band (you're about to drill in).
+    const showReticle = !!ctx.focus.starId;
     if (showReticle) {
       const idx = parseInt(ctx.focus.starId!.replace('st-', ''), 10);
       const s = this.stars[idx];
       if (s) {
         this.focusReticle.visible = true;
         this.focusReticle.position.set(s.body.pos[0], s.body.pos[1], s.body.pos[2]);
-        const fade = Math.min(1, (ctx.zoomIntra - 0.5) * 3.0);   // fade in over the last half
-        (this.focusReticle.material as THREE.SpriteMaterial).opacity = 0.6 * fade;
+        const intraBoost = Math.min(1, Math.max(0, (ctx.zoomIntra - 0.5) * 3.0));
+        // Base 0.35 visibility from click-pin + boost as you scroll in.
+        (this.focusReticle.material as THREE.SpriteMaterial).opacity = 0.35 + 0.45 * intraBoost;
       } else {
         this.focusReticle.visible = false;
       }
@@ -926,6 +949,32 @@ export class GalaxyRegime extends Regime {
   }
 
   pick(intersection: THREE.Intersection): DragTarget | null {
+    // Stars: the user clicked a single point in the 3,500-star Points
+    // cloud. Resolve via intersection.index. Stars don't physically
+    // drag (perturbing one orbit at a time mid-cloud looks broken);
+    // pick() returns a target so the click registers and onClickTarget
+    // pins focus for drill-down into SYSTEM. Visual feedback comes
+    // from the picker sprite (hover magnet) and the focus reticle
+    // (after click), both updated in update().
+    if (intersection.object === this.points && intersection.index !== undefined) {
+      const idx = intersection.index;
+      const s = this.stars[idx];
+      if (!s) return null;
+      // Stash the most-recently-hovered star index for the picker
+      // sprite. Read each frame in update() so the picker tracks the
+      // cursor magnetically. -1 means no current hover (decays opacity).
+      this.hoveredStarIdx = idx;
+      this.hoveredAtWall  = this.wallTime;
+      const worldPos = new THREE.Vector3(s.body.pos[0], s.body.pos[1], s.body.pos[2]);
+      return {
+        id: `st-${idx}`,
+        object: this.points,
+        worldPos,
+        onDragMove: () => { /* stars are click-only; no orbital perturbation */ },
+        onDragEnd:  () => { /* picker fades naturally when hover ends */ }
+      };
+    }
+
     // Walk up the ancestor chain — the user clicks the disk/horizon/ring
     // sub-mesh, but only the BlackHole group has the {type:'bh', index} userData.
     let obj: THREE.Object3D | null = intersection.object;
@@ -956,6 +1005,35 @@ export class GalaxyRegime extends Regime {
   }
 
   hoverInfo(intersection: THREE.Intersection): HoverInfo | null {
+    // Star intersection — paper-physics tooltip for an individual sun.
+    if (intersection.object === this.points && intersection.index !== undefined) {
+      const idx = intersection.index;
+      const s = this.stars[idx];
+      if (!s) return null;
+      const r = Math.hypot(s.body.pos[0], s.body.pos[1], s.body.pos[2]);
+      const v = Math.hypot(s.body.vel[0], s.body.vel[1], s.body.vel[2]);
+      const stateLabel = s.state === 'main'  ? 'main sequence'
+                       : s.state === 'giant' ? 'red giant'
+                       : 'dead';
+      const spectral = s.mass > 16  ? 'O' :
+                       s.mass > 2.1 ? 'B' :
+                       s.mass > 1.4 ? 'A' :
+                       s.mass > 1.0 ? 'F' :
+                       s.mass > 0.8 ? 'G' :
+                       s.mass > 0.45 ? 'K' : 'M';
+      return {
+        title: `Sun · ${spectral}-type · ${stateLabel}`,
+        rows: [
+          { k: 'M',        v: `${s.mass.toFixed(2)} M☉` },
+          { k: 't_MS',     v: `${s.lifetime.toExponential(2)} Gyr` },
+          { k: 'r (galactic)', v: `${r.toFixed(2)} sim` },
+          { k: 'v (RAR)',  v: `${v.toExponential(2)} sim/s` },
+          { k: 'birth',    v: `${s.birth.toFixed(3)} Gyr` },
+        ],
+        note: 'Click to pin focus, then scroll zoom-in to drill into this star\'s planetary system. Orbital motion uses the paper\'s exponential RAR — Newton near the SMBH, deep-MOND at the outer disk.'
+      };
+    }
+
     let obj: THREE.Object3D | null = intersection.object;
     while (obj && obj.userData?.type !== 'bh') obj = obj.parent;
     if (!obj) return null;
