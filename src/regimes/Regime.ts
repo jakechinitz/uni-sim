@@ -17,6 +17,7 @@ export interface RegimeContext {
   edePulse: number;        // 0..1 strength of the Hubble-tension pulse
   entanglementOn: boolean;
   diskOn: boolean;         // galaxy spiral overlay toggle
+  diskDetailOn: boolean;   // dust lanes + HII regions + arm clumps (cosmetic)
   manyPastsOn: boolean;    // §21 ghost-trajectory overlay (visible when rewinding)
   dtWall: number;          // wall-clock seconds since last frame (UI animations)
   rate: number;            // current sim_sec / wall_sec from the speed slider
@@ -65,6 +66,13 @@ export abstract class Regime {
   // Each entry: world-space position + NDC-space lens radius (0.05 ≈
   // a few percent of the screen).
   lensSources(): { worldPos: THREE.Vector3; radius: number }[] { return []; }
+
+  // World-space position of the currently focused object (if any).
+  // Used by App to lerp the OrbitControls target toward the focused
+  // thing as the user scrubs the zoom slider, so the camera flies
+  // toward whatever the user clicked instead of pulling toward origin.
+  // Default: no focus → null (target stays at origin).
+  focusedWorldPos(_focus: FocusState): THREE.Vector3 | null { return null; }
 
   resize(w: number, h: number) {
     this.camera.aspect = w / h;

@@ -27,6 +27,7 @@ export function bindUI(cb: UICallbacks) {
   const btnNew      = el<HTMLButtonElement>('btn-newseed');
   const togEnt      = el<HTMLInputElement>('toggle-entangle');
   const togDisk     = el<HTMLInputElement>('toggle-disk');
+  const togDiskD    = el<HTMLInputElement>('toggle-disk-detail');
   const togMP       = el<HTMLInputElement>('toggle-manypasts');
 
   // Init from state. paintTransport / refreshPresetState rely on `chips`
@@ -53,6 +54,8 @@ export function bindUI(cb: UICallbacks) {
   // Backfill disk toggle for saves predating it (defensive: undefined → true)
   cb.state.toggles.disk = cb.state.toggles.disk ?? true;
   togDisk.checked   = cb.state.toggles.disk;
+  cb.state.toggles.diskDetail = cb.state.toggles.diskDetail ?? true;
+  togDiskD.checked  = cb.state.toggles.diskDetail;
   cb.state.toggles.manyPasts = cb.state.toggles.manyPasts ?? false;
   togMP.checked     = cb.state.toggles.manyPasts;
   paintTransport();
@@ -122,6 +125,10 @@ export function bindUI(cb: UICallbacks) {
   btnNew.addEventListener('click', () => cb.onNewSeed());
   togEnt.addEventListener('change', () => {
     cb.state.toggles.entangle = togEnt.checked;
+    cb.onChange();
+  });
+  togDiskD.addEventListener('change', () => {
+    cb.state.toggles.diskDetail = togDiskD.checked;
     cb.onChange();
   });
   togDisk.addEventListener('change', () => {

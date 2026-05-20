@@ -223,14 +223,27 @@ export class App {
   }
 
   // Each frame: pin the camera at the radial distance the zoom slider
-  // implies, preserving the orbit direction. This lets the wheel drive the
-  // slider (which advances regimes seamlessly) while OrbitControls still
-  // owns the orbital direction + pan.
+  // implies, preserving the orbit direction. Also lerp the controls
+  // target toward the focused thing (the clicked galaxy/star) so the
+  // camera flies INTO it as the user zooms — instead of pulling toward
+  // world-origin while a perfectly-good focused target sits off-centre.
   private applySliderDistance() {
     const slice = decodeZoom(this.state.zoom);
     const lim = REGIME_LIMITS[slice.regime];
-    // intra=0 = zoomed all the way out (camera at max distance)
-    // intra=1 = zoomed all the way in (camera at min distance, about to cross)
+
+    // Lerp controls.target toward the focused thing ONLY when the user
+    // has explicitly clicked-pinned something. Without a pin, the camera
+    // free-orbits world origin like before. With a pin, the camera flies
+    // smoothly into the clicked galaxy/star as the user scrolls in.
+    const focusPos = this.regimes.hasPin()
+      ? this.regimes.current.focusedWorldPos(this.regimes.focus)
+      : null;
+    const want = focusPos ?? this._originVec;
+    // Stronger lerp at higher intra so the target snaps to the focused
+    // object as we approach the next regime.
+    const lerpRate = 0.04 + 0.16 * slice.intra;
+    this.controls.target.lerp(want, Math.min(1, lerpRate));
+
     const dist = lim.max - (lim.max - lim.min) * slice.intra;
     const cam = this.regimes.current.camera;
     const dir = cam.position.clone().sub(this.controls.target);
@@ -239,6 +252,7 @@ export class App {
     dir.multiplyScalar(dist / curLen);
     cam.position.copy(this.controls.target).add(dir);
   }
+  private _originVec = new THREE.Vector3();
 
   // Wheel input is intercepted by the canvas listener (see constructor)
   // and routed into the unified zoom slider. deltaY < 0 (scroll up) = zoom
@@ -307,6 +321,7 @@ export class App {
       edePulse: ede,
       entanglementOn: this.state.toggles.entangle,
       diskOn: this.state.toggles.disk ?? true,
+      diskDetailOn: this.state.toggles.diskDetail ?? true,
       manyPastsOn: (this.state.toggles.manyPasts ?? false) && this.clock.direction === -1 && this.clock.playing,
       dtWall,
       rate: this.clock.speed,
