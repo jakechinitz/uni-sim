@@ -40,7 +40,12 @@ export class TelegrapherWavepacketAnchor extends Anchor {
   private cloudDummy = new THREE.Object3D();
   private emitMarker!: THREE.Sprite;
   private wallTime = 0;
-  private lastEmission = -1;
+  // Wall-time at which the next packet should be emitted. Initialised
+  // to the first-emit moment so the first packet fires at EMIT_AT_S
+  // (the earlier "lastEmission = -1, fire when sinceLoop - last >= LOOP"
+  // pattern incorrectly required sinceLoop ≥ LOOP_DUR for the first
+  // emission — packet never appeared).
+  private nextEmitAt = EMIT_AT_S;
 
   constructor(aspect: number) {
     super({
@@ -151,7 +156,7 @@ export class TelegrapherWavepacketAnchor extends Anchor {
   restart() {
     this.sim = new SubstrateSim(N_GRID);
     this.wallTime = 0;
-    this.lastEmission = -1;
+    this.nextEmitAt = EMIT_AT_S;
     this.cloudMesh.count = 0;
     this.cloudMesh.instanceMatrix.needsUpdate = true;
     (this.emitMarker.material as THREE.SpriteMaterial).opacity = 0;
@@ -164,21 +169,21 @@ export class TelegrapherWavepacketAnchor extends Anchor {
     this.wallTime += ctx.wallDt;
 
     // Emit on the schedule: first packet at EMIT_AT_S, then every LOOP_DUR.
-    const sinceLoop = this.wallTime - EMIT_AT_S;
-    if (sinceLoop > 0 && sinceLoop - this.lastEmission >= LOOP_DUR) {
+    if (this.wallTime >= this.nextEmitAt) {
       // Reset the lattice and emit a fresh wavepacket — visually cleaner
       // than letting old wavefronts pile up.
       this.sim = new SubstrateSim(N_GRID);
       // Emit from x = -85% of the lattice, moving in +X direction.
-      // amp=0.30 chosen so q drops to ~0.7 at the packet centre — visible
-      // but not saturating. sigma=2.0 cells ≈ packet width 4 cells across.
+      // amp=0.45 → q drops to ~0.55 at the packet centre. sigma=2.5
+      // cells ≈ packet width 5 cells; large enough to read at our
+      // camera distance.
       const N = N_GRID;
       this.sim.emitPacket(
         N * 0.08, N / 2, N / 2,
         1, 0, 0,
-        0.30, 2.0
+        0.45, 2.5
       );
-      this.lastEmission = sinceLoop;
+      this.nextEmitAt = this.wallTime + LOOP_DUR;
       // Flash the emit marker
       (this.emitMarker.material as THREE.SpriteMaterial).opacity = 1.0;
     }
@@ -206,7 +211,9 @@ export class TelegrapherWavepacketAnchor extends Anchor {
 
     for (let c = 0; c < dim; c++) {
       const q = this.sim.q[c];
-      if (q > 0.94) continue;            // Vacuum baseline — skip
+      // Lower threshold so the wavepacket reads throughout its travel,
+      // not just at its core.
+      if (q > 0.985) continue;
       const i = c % N;
       const j = ((c - i) / N) % N;
       const k = (c - i - j * N) / (N * N);

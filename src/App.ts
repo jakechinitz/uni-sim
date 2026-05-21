@@ -173,9 +173,14 @@ export class App {
           this.anchors.setActive(id);
           if (id === null || !this.anchors.current) {
             updateAnchorPanel(null);
+            // Returning to live: re-bind OrbitControls to the regime camera.
+            this.installControls();
           } else {
             const m = this.anchors.current.meta;
             updateAnchorPanel({ title: m.title, paperRef: m.paperRef, blurb: m.blurb });
+            // Anchor active: bind OrbitControls to the anchor's camera so
+            // the user can orbit / zoom-with-wheel the demo.
+            this.installControlsForAnchor(this.anchors.current.camera);
           }
         },
         onRestart: () => this.anchors.restart()
@@ -249,6 +254,26 @@ export class App {
     if (this.drag) this.drag.attachControls(this.controls);
   }
 
+  // Attach OrbitControls to an anchor's camera so the user can orbit it.
+  // Anchors get free rotation + pan; we leave wheel-zoom disabled so the
+  // unified zoom slider's semantics aren't broken when the user returns
+  // to live universe. Re-uses the same OrbitControls instance pattern as
+  // installControls() for regime cameras.
+  private installControlsForAnchor(cam: THREE.PerspectiveCamera) {
+    if (this.controls) this.controls.dispose();
+    this.controls = new OrbitControls(cam, this.canvas);
+    this.controls.enableDamping = true;
+    this.controls.dampingFactor = 0.08;
+    this.controls.enableZoom = true;   // anchors don't use the unified zoom slider, so wheel-zoom is fine here
+    this.controls.enablePan = true;
+    this.controls.screenSpacePanning = true;
+    this.controls.rotateSpeed = 0.5;
+    this.controls.panSpeed = 0.8;
+    this.controls.target.set(0, 0, 0);
+    this.controls.update();
+    if (this.drag) this.drag.attachControls(this.controls);
+  }
+
   // Each frame: pin the camera at the radial distance the zoom slider
   // implies, preserving the orbit direction. Also lerp the controls
   // target toward the focused thing (the clicked galaxy/star) so the
@@ -286,6 +311,9 @@ export class App {
   // in. The slider's onChange handler in bindUI updates regime + camera
   // distance via the normal pipeline.
   private onWheel = (ev: WheelEvent) => {
+    // In anchor mode the OrbitControls wheel-zoom is enabled; let the
+    // wheel event pass through to OrbitControls untouched.
+    if (this.anchors.current) return;
     ev.preventDefault();
     // Per-pixel wheel deltas vary by device. Tuned so a single mouse-wheel
     // notch (deltaY ≈ 100) moves the slider by ~0.02, meaning ~12 notches
@@ -340,6 +368,8 @@ export class App {
     const anchor = this.anchors.current;
     if (anchor) {
       anchor.update({ playing: this.clock.playing, wallDt: dtWall, simDt: dtSim });
+      // Keep OrbitControls' damping/rotation alive each frame.
+      if (this.controls) this.controls.update();
       // Anchors that include BHs publish lens sources just like regimes.
       this.composer.setLensSources(anchor.camera, anchor.lensSources());
       this.composer.setScene(anchor.scene, anchor.camera);
