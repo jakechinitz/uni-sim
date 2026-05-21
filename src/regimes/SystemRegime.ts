@@ -11,6 +11,7 @@ import { TelegrapherField } from '../render/Telegrapher';
 import { PhotonField } from '../render/Photons';
 import { mainSeqLifetime, SUPERNOVA_MASS } from '../core/StellarLifecycle';
 import { BlackHole } from '../render/BlackHole';
+import { visualRatePerWall } from '../util/timeScale';
 
 const G_SIM     = 4.0;
 const A0_SIM    = 1e-9;     // effectively Newton at this scale
@@ -272,11 +273,18 @@ export class SystemRegime extends Regime {
   }
 
   update(ctx: RegimeContext, dt: number): void {
-    const visDt = Math.min(0.06, Math.abs(dt)) * Math.sign(dt || 1);
+    // Speed-aware visual integration step. visualRatePerWall maps the
+    // unified clock's literal sim_sec/wall_sec to a logarithmically
+    // capped visual rate, so chip presets (Year/s, Myr/s, Gyr/s)
+    // produce visibly distinct orbital advance instead of all
+    // saturating at the same per-frame cap.
+    const visPerWall = visualRatePerWall(ctx.rate);
+    const visDt = visPerWall * ctx.dtWall * Math.sign(ctx.rate || 1);
     this.time += visDt;
     this.wallTime += ctx.dtWall;
-    const sub = 2;
+    const sub = Math.min(30, Math.max(2, Math.ceil(Math.abs(visDt) / 1.0)));
     const dtSim = visDt / sub;
+    void dt;   // intentional: visDt now derived from ctx.rate, not raw dt
     const bodies: Body[] = [this.starBody, ...this.planets.map(p => p.body)];
     for (let s = 0; s < sub; s++) {
       stepLeapfrog(bodies, dtSim, (i, all) => accelOnRAR(i, all, G_SIM, A0_SIM));
