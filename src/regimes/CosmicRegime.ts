@@ -11,6 +11,7 @@ import { hashStr } from '../util/hash';
 import { smoothstep, clamp01 } from '../util/lerp';
 import { a as scaleFactor } from '../core/Cosmology';
 import { ManyPasts } from '../render/ManyPasts';
+import { visualRatePerWall } from '../util/timeScale';
 
 // N_GAL drives the dominant CPU cost: O(N²) per-pair RAR integration per
 // substep. 220 keeps the cosmic-web looking dense without choking the CPU.
@@ -332,8 +333,14 @@ export class CosmicRegime extends Regime {
     this._nbodyTick = (this._nbodyTick + 1) % 2;
     if (this._nbodyTick === 0) {
       const bodies = this.galaxies.map(g => g.body);
-      const visDt = Math.min(0.06, Math.abs(dt)) * Math.sign(dt || 1);
-      stepLeapfrog(bodies, visDt, (i, all) => accelOnRAR(i, all, G_SIM, A0_SIM));
+      // Speed-aware visual integration step. See visualRatePerWall:
+      // chip presets now produce distinct cosmic-web motion rates
+      // instead of all saturating at the same per-frame cap.
+      const visPerWall = visualRatePerWall(ctx.rate);
+      const visDt = visPerWall * ctx.dtWall * Math.sign(ctx.rate || 1);
+      const visClamp = Math.max(-3, Math.min(3, visDt));     // cosmic-web stability
+      stepLeapfrog(bodies, visClamp, (i, all) => accelOnRAR(i, all, G_SIM, A0_SIM));
+      void dt;
     }
     // Apply combined Hubble flow + EDE breath to positions
     for (const g of this.galaxies) {

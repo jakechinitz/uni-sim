@@ -6,6 +6,7 @@ import { Regime, RegimeContext, DragTarget, HoverInfo, FocusState } from './Regi
 import { mulberry32 } from '../core/Rng';
 import { hashStr } from '../util/hash';
 import { radialGlow, deltaSField } from '../render/Glow';
+import { visualRatePerWall } from '../util/timeScale';
 import { BlackHole } from '../render/BlackHole';
 import { Body, nuRAR } from '../core/Gravity';
 import { TelegrapherField } from '../render/Telegrapher';
@@ -708,10 +709,14 @@ export class GalaxyRegime extends Regime {
     this.silentCatchup = cosmicGap > 0.005;
     this.lastSeenCosmicT = ctx.time;
 
-    // dt is sim seconds. Clamp the per-frame step so fast-forward doesn't
-    // shatter orbits; wall-time accumulator drives pure-UI animations (halo
-    // fade, camera pan) so they stay alive at extreme speeds.
-    const visDt = Math.min(0.06, Math.abs(dt)) * Math.sign(dt || 1);
+    // Visual integration step. Old behaviour clamped dt at 0.06 sim_sec
+    // per frame, which meant any speed slider position above ~Day/s
+    // saturated to the same orbital rate — Myr/s and Gyr/s looked
+    // identical. visualRatePerWall maps speedExp logarithmically so
+    // each chip preset produces a visibly distinct orbital advance,
+    // capped at 200 sim_sec/wall_sec for stability + perf.
+    const visPerWall = visualRatePerWall(ctx.rate);
+    const visDt = visPerWall * ctx.dtWall * Math.sign(ctx.rate || 1);
     this.time += visDt;
     this.wallTime += ctx.dtWall;
     this.spiralMat.uniforms.time.value = this.time;
@@ -744,7 +749,12 @@ export class GalaxyRegime extends Regime {
     // O(N²) inner loop is free. After each substep, check for mergers:
     // if two BHs come within combined Schwarzschild radius, they coalesce
     // into one body conserving mass + linear momentum, emit a wavefront.
-    const sub = 2;
+    // Adaptive substep count: each substep stays below ~1 sim_sec for
+    // leapfrog stability. visDt now spans up to ~3.5 sim_sec/frame at
+    // Gyr/s, so a fixed sub=2 was leaving each step at ~1.7 sim_sec,
+    // borderline. Cap at 30 substeps so extreme rewinds don't tank
+    // performance. Minimum 2 keeps the leapfrog midpoint quality.
+    const sub = Math.min(30, Math.max(2, Math.ceil(Math.abs(visDt) / 1.0)));
     const dtSim = visDt / sub;
     for (let s = 0; s < sub; s++) {
       // Compute accelerations on each non-fixed BH from all others
