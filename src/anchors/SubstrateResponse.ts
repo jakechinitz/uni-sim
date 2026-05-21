@@ -160,7 +160,11 @@ export class SubstrateResponseAnchor extends Anchor {
     // vacuum baseline. drainRate 0.35 ≈ moderate well — fast enough to
     // generate a clean wavefront, slow enough to read the settle.
     if (!this.defectDropped && this.wallTime > DROP_AT_S) {
-      this.sim.addDefect(N_GRID / 2, N_GRID / 2, N_GRID / 2, 0.35, 'src');
+      // drainRate 0.8: stronger well so the wavefront has visible amplitude
+      // as it leaves the source. The original 0.35 produced a real wave
+      // but with q values just barely under the visibility threshold —
+      // looked like "nothing was happening" past the immediate defect.
+      this.sim.addDefect(N_GRID / 2, N_GRID / 2, N_GRID / 2, 0.8, 'src');
       this.defectDropped = true;
     }
 
@@ -190,7 +194,10 @@ export class SubstrateResponseAnchor extends Anchor {
 
     for (let c = 0; c < dim; c++) {
       const q = this.sim.q[c];
-      if (q > 0.94) continue;                 // Vacuum baseline — skip
+      // Lowered visibility threshold from 0.94 to 0.985 so the propagating
+      // wavefront (which is a small q dip far from the source) is visible
+      // throughout its travel, not just near the saturated centre.
+      if (q > 0.985) continue;
       const i = c % N;
       const j = ((c - i) / N) % N;
       const k = (c - i - j * N) / (N * N);
@@ -201,7 +208,9 @@ export class SubstrateResponseAnchor extends Anchor {
       const hot = Math.max(0, 1 - q / 0.35);   // > 0 only near saturation
 
       this.cloudDummy.position.set(x, y, z);
-      this.cloudDummy.scale.setScalar(this.cellSize * (0.85 + 0.6 * dep));
+      // Larger base scale so individual cells read as soft bubbles, not
+      // sub-pixel specks. Depletion still modulates the size on top.
+      this.cloudDummy.scale.setScalar(this.cellSize * (1.05 + 0.8 * dep));
       this.cloudDummy.updateMatrix();
       this.cloudMesh.setMatrixAt(cloudN, this.cloudDummy.matrix);
 

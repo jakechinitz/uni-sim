@@ -21,15 +21,19 @@ import { traceChi, edePulse } from '../core/Cosmology';
 import { radialGlow } from '../render/Glow';
 
 // 8 paper-labelled epochs along the rail, log-spaced in cosmic time.
-const EPOCHS: { tGyr: number; label: string }[] = [
-  { tGyr: 1e-9,   label: 'Big Bang' },
-  { tGyr: 1e-6,   label: 'Inflation end' },
-  { tGyr: 1e-5,   label: 'Radiation era' },
-  { tGyr: 5e-5,   label: 'Matter-rad equality · EDE pulse' },
-  { tGyr: 3.8e-4, label: 'Recombination' },
-  { tGyr: 0.15,   label: 'First stars' },
-  { tGyr: 1.0,    label: 'Galaxies' },
-  { tGyr: 13.8,   label: 'Today' }
+// `lane` alternates the vertical position of the label so adjacent
+// labels can't overlap horizontally even when their tGyr values sit
+// within one decade of each other (which is most of the early
+// universe). lane 0 = below the rail, lane 1 = further below.
+const EPOCHS: { tGyr: number; label: string; lane: 0 | 1 }[] = [
+  { tGyr: 1e-9,   label: 'Big Bang',     lane: 0 },
+  { tGyr: 1e-6,   label: 'Inflation',    lane: 1 },
+  { tGyr: 1e-5,   label: 'Radiation',    lane: 0 },
+  { tGyr: 5e-5,   label: 'EDE pulse',    lane: 1 },
+  { tGyr: 3.8e-4, label: 'Recomb',       lane: 0 },
+  { tGyr: 0.15,   label: 'First stars',  lane: 1 },
+  { tGyr: 1.0,    label: 'Galaxies',     lane: 0 },
+  { tGyr: 13.8,   label: 'Today',        lane: 1 }
 ];
 
 const RAIL_LEN     = 22;        // sim units (the rail spans -RAIL_LEN/2 .. +RAIL_LEN/2 on X)
@@ -128,28 +132,47 @@ export class CosmologicalActivationAnchor extends Anchor {
   private buildEpochLabels() {
     for (const e of EPOCHS) {
       const xpos = this.tToX(e.tGyr);
-      this.epochLabels.push(this.makeTextSprite(e.label, xpos));
+      // Vertical lane keeps adjacent labels from colliding when their
+      // log-spaced X positions are within one decade of each other.
+      const ypos = e.lane === 0 ? -0.9 : -1.55;
+      this.epochLabels.push(this.makeTextSprite(e.label, xpos, ypos, e.lane));
     }
   }
 
   // Quick canvas-to-sprite text label. Lightweight; no Three's Text.
-  private makeTextSprite(text: string, xpos: number): THREE.Sprite {
+  // A short tick from the rail down to the label clarifies which epoch
+  // any given label belongs to when adjacent labels live in different
+  // vertical lanes.
+  private makeTextSprite(text: string, xpos: number, ypos: number, lane: 0 | 1): THREE.Sprite {
     const cvs = document.createElement('canvas');
-    cvs.width = 512; cvs.height = 64;
+    cvs.width = 256; cvs.height = 48;
     const ctx = cvs.getContext('2d')!;
-    ctx.font = 'bold 22px ui-monospace, monospace';
+    ctx.font = 'bold 18px ui-monospace, monospace';
     ctx.fillStyle = 'rgba(220, 230, 255, 0.92)';
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
-    ctx.fillText(text, 256, 32);
+    ctx.fillText(text, 128, 24);
     const tex = new THREE.CanvasTexture(cvs);
     tex.minFilter = THREE.LinearFilter;
     const sp = new THREE.Sprite(new THREE.SpriteMaterial({
       map: tex, transparent: true, depthWrite: false
     }));
-    sp.scale.set(4.8, 0.6, 1);
-    sp.position.set(xpos, -1.0, 0);
+    // Compact size (was 4.8 wide; now 2.2). Combined with the two lanes,
+    // labels at adjacent epochs now have ~5× the horizontal headroom.
+    sp.scale.set(2.2, 0.42, 1);
+    sp.position.set(xpos, ypos, 0);
     this.scene.add(sp);
+    // Thin vertical tick from the rail down to the label, so the label
+    // can be visually attributed to the right epoch even at a glance.
+    const tickG = new THREE.BufferGeometry();
+    const tickHeight = lane === 0 ? -0.65 : -1.3;
+    tickG.setAttribute('position', new THREE.BufferAttribute(new Float32Array([
+      xpos, 0, 0, xpos, tickHeight, 0
+    ]), 3));
+    const tickM = new THREE.LineBasicMaterial({
+      color: 0x4a5e88, transparent: true, opacity: 0.6, depthWrite: false
+    });
+    this.scene.add(new THREE.Line(tickG, tickM));
     return sp;
   }
 
