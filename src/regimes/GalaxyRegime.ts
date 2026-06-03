@@ -411,11 +411,11 @@ export class GalaxyRegime extends Regime {
     this.starGeom.setAttribute('color', this.colAttr);
 
     this.starMaterial = new THREE.PointsMaterial({
-      // Each point is a whole solar system. Size 0.14 paired with the
+      // Each point is a whole solar system. Size 0.17 paired with the
       // 8,000-star count gives a brighter surrounding field that
       // balances the now-smaller BH. Additive blending + ACES tonemap
       // still composite into a continuous bright wash at zoom-out.
-      size: 0.14, sizeAttenuation: true,
+      size: 0.17, sizeAttenuation: true,
       vertexColors: true,
       transparent: true, depthWrite: false, opacity: 1.0,
       blending: THREE.AdditiveBlending,
@@ -732,12 +732,18 @@ export class GalaxyRegime extends Regime {
     // or as a freshly-mounted regime) stars were so faint that with bloom
     // off the disk looked empty. 0.45 lets the dimmest unborn stars still
     // glint.
-    this.starMaterial.opacity = 0.45 + 0.55 * galaxyAlpha;
+    // Floor at 0.62 so the surrounding star field never dims to near-nothing
+    // when galaxyAlpha is low (early assembly / freshly-mounted regime).
+    this.starMaterial.opacity = Math.max(0.45 + 0.55 * galaxyAlpha, 0.62);
     // Central SMBH grows with time (visualised as a slow accretion-disk
     // scale-up). Multiplier 0.85 → 1.15 over 0..13.8 Gyr.
     const smbhGrowth = 0.85 + 0.3 * Math.min(1, tG / 13.8);
+    // Visual-only shrink applied to every BH mesh so black holes don't swamp
+    // the disk. Physics (merger reach, q-shell) derives from mass/rs, not mesh
+    // scale, so this is purely cosmetic.
+    const VISUAL_BH_SCALE = 0.5;
     for (const bh of this.bhs) {
-      if (bh.isCentral) bh.mesh.scale.setScalar(smbhGrowth);
+      bh.mesh.scale.setScalar((bh.isCentral ? smbhGrowth : 1) * VISUAL_BH_SCALE);
     }
     // Disk toggle — when off, just the stars + BHs are visible (much more
     // legible from below the galactic plane).
@@ -801,7 +807,7 @@ export class GalaxyRegime extends Regime {
     // wanders inside a BH's tidal radius, it's disrupted: marked dead
     // (death flash will fire next frame) and the BH disk brightens
     // transiently.
-    const TIDAL_K = 0.025;      // r_tidal = TIDAL_K * sqrt(M) — visual cue
+    const TIDAL_K = 0.055;      // r_tidal = TIDAL_K * sqrt(M) — visual cue
     for (let s = 0; s < sub; s++) {
       for (const star of this.stars) {
         if (star.body.fixed || star.state === 'dead' || star.state === 'absorbed') continue;
@@ -939,9 +945,12 @@ export class GalaxyRegime extends Regime {
           }
           r = g = b = 0;
         } else {
-          // Low-mass → cooling white dwarf. Tiny, dim, slightly blue.
+          // Low-mass → cooling white dwarf. Tiny, dim, slightly blue. Capped
+          // faint so old dwarfs read as embers, not bright points.
           const cooled = Math.exp(-sinceDeath * 0.6);     // fade over Gyr
-          r = 0.30 * cooled; g = 0.40 * cooled; b = 0.55 * cooled;
+          r = Math.min(0.30 * cooled, 0.16);
+          g = Math.min(0.40 * cooled, 0.22);
+          b = Math.min(0.55 * cooled, 0.34);
         }
       }
       col[i * 3 + 0] = r;
@@ -1133,6 +1142,9 @@ export class GalaxyRegime extends Regime {
       const idx = intersection.index;
       const s = this.stars[idx];
       if (!s) return null;
+      // Swallowed stars are invisible and parked on the BH — a click there
+      // must not pin focus on a star that no longer exists.
+      if (s.state === 'absorbed') return null;
       // Stash the most-recently-hovered star index for the picker
       // sprite. Read each frame in update() so the picker tracks the
       // cursor magnetically. -1 means no current hover (decays opacity).
@@ -1183,11 +1195,11 @@ export class GalaxyRegime extends Regime {
       const idx = intersection.index;
       const s = this.stars[idx];
       if (!s) return null;
+      if (s.state === 'absorbed') return null;
       const r = Math.hypot(s.body.pos[0], s.body.pos[1], s.body.pos[2]);
       const v = Math.hypot(s.body.vel[0], s.body.vel[1], s.body.vel[2]);
-      const stateLabel = s.state === 'main'     ? 'main sequence'
-                       : s.state === 'giant'    ? 'red giant'
-                       : s.state === 'absorbed' ? 'consumed by BH'
+      const stateLabel = s.state === 'main'  ? 'main sequence'
+                       : s.state === 'giant' ? 'red giant'
                        : 'dead';
       const spectral = s.mass > 16  ? 'O' :
                        s.mass > 2.1 ? 'B' :

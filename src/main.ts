@@ -1,4 +1,3 @@
-import './regimes/GalaxyRuntimePatch';
 import './AppControlsPatch';
 import { App } from './App';
 import { runPhysicsSelfTest } from './core/physicsSelfTest';
