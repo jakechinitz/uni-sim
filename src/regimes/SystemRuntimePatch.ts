@@ -1,7 +1,10 @@
 import * as THREE from 'three';
 import { SystemRegime } from './SystemRegime';
 
-type PatchedSystem = SystemRegime & {
+// Standalone structural type — NOT intersected with SystemRegime (its fields
+// are private; intersecting collapses the type to `never`, TS2339, breaking
+// the build). The patch reaches them via `prototype as any`.
+type PatchedSystem = {
   starDied?: boolean;
   remnant?: THREE.Object3D | null;
   starLight?: THREE.PointLight;
