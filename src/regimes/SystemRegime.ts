@@ -1,4 +1,4 @@
-// SYSTEM: a star + 5–8 planets on Keplerian orbits. Drag any planet/star to perturb.
+// SYSTEM: a star + 5-8 planets on Keplerian orbits. Drag any planet/star to perturb.
 // RAR collapses to Newton at AU scale (g_bar >> a0), so orbits look correct.
 
 import * as THREE from 'three';
@@ -47,8 +47,6 @@ export class SystemRegime extends Regime {
   private starLifetime = 10;        // Gyr
   private starBirth    = 0.1;       // Gyr
   private starBaseScale = 40;
-  private starHotCol  = new THREE.Color('#fffae0');
-  private starMidCol  = new THREE.Color('#ffcc70');
   private starDied = false;
   private remnant: BlackHole | null = null;  // post-supernova remnant
   // Photon field — propSpeed 1000 scene-units/sim-sec → visible at "Light"
@@ -81,9 +79,9 @@ export class SystemRegime extends Regime {
       // Realistic stellar colour distribution: mostly cool reds/oranges,
       // some yellows, occasional blue
       const t = rng();
-      if (t < 0.6)      bgCol.setHSL(0.04 + rng() * 0.08, 0.6, 0.55);
-      else if (t < 0.9) bgCol.setHSL(0.12 + rng() * 0.05, 0.6, 0.65);
-      else              bgCol.setHSL(0.6 + rng() * 0.08, 0.7, 0.75);
+      if (t < 0.6)      bgCol.setHSL(0.04 + rng() * 0.08, 0.6, 0.62);
+      else if (t < 0.9) bgCol.setHSL(0.12 + rng() * 0.05, 0.6, 0.70);
+      else              bgCol.setHSL(0.6 + rng() * 0.08, 0.7, 0.82);
       bgColArr[i * 3 + 0] = bgCol.r;
       bgColArr[i * 3 + 1] = bgCol.g;
       bgColArr[i * 3 + 2] = bgCol.b;
@@ -91,11 +89,11 @@ export class SystemRegime extends Regime {
     bgGeom.setAttribute('position', new THREE.BufferAttribute(bgPos, 3));
     bgGeom.setAttribute('color',    new THREE.BufferAttribute(bgColArr, 3));
     const bgMat = new THREE.PointsMaterial({
-      size: 1.8,
+      size: 2.4,
       vertexColors: true,
       sizeAttenuation: true,
       transparent: true,
-      opacity: 0.95,
+      opacity: 1.0,
       depthWrite: false,
       blending: THREE.AdditiveBlending
     });
@@ -315,11 +313,12 @@ export class SystemRegime extends Regime {
         starMat.color.setRGB(1, 1, 1);
         starMat.opacity = 1;
       } else if (lifeFrac < 1.0) {
-        // Subgiant → red giant: bloat to 3-4×, redden, brighten
+        // Subgiant → red giant: bloat and redden, but keep it below
+        // the old HDR-red level that made slow day/year views look stuck.
         const x = (lifeFrac - 0.85) / 0.15;
-        const scale = this.starBaseScale * (1 + 2.8 * x);
+        const scale = this.starBaseScale * (1 + 1.7 * x);
         this.starMesh.scale.setScalar(scale);
-        starMat.color.setRGB(1.4, 0.55 - 0.25 * x, 0.30 - 0.20 * x);
+        starMat.color.setRGB(1.05, 0.48 - 0.16 * x, 0.30 - 0.12 * x);
       } else {
         // Death event fires once
         this.starDied = true;
@@ -370,17 +369,18 @@ export class SystemRegime extends Regime {
     this.telegrapher.update(visDt);
 
     // Photons — real particles emitted by the star and propagating at sim-c.
-    // Emit at a wall-time pace (visible at any speed); advance with visDt so
-    // slow-mo makes them crawl. At fast-forward they blast across instantly.
+    // Emit only while the star is alive; after a BH remnant forms, existing
+    // photons can fall through the remnant but the dead star no longer glows.
     const starPos = new THREE.Vector3(this.starBody.pos[0], this.starBody.pos[1], this.starBody.pos[2]);
-    // Trickle photons in: a steady ~50 per wall-second baseline, plus burst
-    // proportional to sim-time advance so emission scales with speed
-    this.photons.emit(starPos, 50, ctx.dtWall);
-    this.photons.emit(starPos, 0.4, visDt);
+    if (!this.starDied) {
+      this.photons.emit(starPos, 50, ctx.dtWall);
+      this.photons.emit(starPos, 0.4, visDt);
+    }
     const absorbers = this.planets.map(pv => ({
       pos: new THREE.Vector3(pv.body.pos[0], pv.body.pos[1], pv.body.pos[2]),
       radius: 14
     }));
+    if (this.remnant) absorbers.push({ pos: this.remnant.position.clone(), radius: 20 });
     this.photons.update(visDt, starPos, absorbers);
   }
 
@@ -401,20 +401,20 @@ export class SystemRegime extends Regime {
       400, isSupernova ? 1.6 : 0.7
     );
     if (isSupernova) {
-      // Spawn a proper BH at the star's position. Material/colours match
-      // the hot end of the galaxy-scale stellar BHs.
+      // Spawn a proper BH at the star's position. Kept smaller so it reads
+      // as a remnant, not a huge red substitute for the dead star.
       this.remnant = new BlackHole({
-        radius: 2.2, diskInner: 2.6, diskOuter: 6.5,
+        radius: 1.1, diskInner: 2.4, diskOuter: 5.2,
         diskTilt: 0.45,
         hot: new THREE.Color(1, 0.95, 0.85),
-        mid: new THREE.Color(1, 0.55, 0.30),
-        cool: new THREE.Color('#ffa050')
+        mid: new THREE.Color(0.9, 0.42, 0.22),
+        cool: new THREE.Color('#7ad7ff')
       });
       this.remnant.position.set(this.starBody.pos[0], this.starBody.pos[1], this.starBody.pos[2]);
       this.scene.add(this.remnant);
-      // Light dims after the explosion (BH doesn't emit visible)
-      this.starLight.intensity = 4;
-      this.starLight.color.set(0xff8060);
+      // A black-hole remnant should not leave a bright red point light.
+      this.starLight.intensity = 1.2;
+      this.starLight.color.set(0x304050);
     } else {
       // White-dwarf sprite at 1/8 the scale, bluish-white
       const wd = new THREE.Sprite(new THREE.SpriteMaterial({
@@ -441,7 +441,7 @@ export class SystemRegime extends Regime {
     if (!this.remnant) return [];
     const cam = this.camera.position;
     const dist = this.remnant.position.distanceTo(cam) + 1e-3;
-    const ndcR = Math.min(0.18, 5 / dist);
+    const ndcR = Math.min(0.11, 2.6 / dist);
     return [{ worldPos: this.remnant.position, radius: ndcR }];
   }
 
