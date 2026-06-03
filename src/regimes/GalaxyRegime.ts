@@ -67,8 +67,8 @@ interface Star {
   mass: number;        // M☉ — drives lifetime + death channel
   birth: number;       // cosmic time (Gyr) when this star ignites
   lifetime: number;    // Gyr — main-sequence span, t ∝ M^−2.5
-  state: 'main' | 'giant' | 'dead';
-  deathT: number;      // cosmic Gyr when it died (Infinity if still alive)
+  state: 'main' | 'giant' | 'dead' | 'absorbed';
+  deathT: number;      // cosmic Gyr when it died/was eaten (Infinity if alive)
   spawnedBH: boolean;  // true once we've added a stellar BH from a supernova
 }
 
@@ -804,7 +804,7 @@ export class GalaxyRegime extends Regime {
     const TIDAL_K = 0.025;      // r_tidal = TIDAL_K * sqrt(M) — visual cue
     for (let s = 0; s < sub; s++) {
       for (const star of this.stars) {
-        if (star.body.fixed || star.state === 'dead') continue;
+        if (star.body.fixed || star.state === 'dead' || star.state === 'absorbed') continue;
         let ax = 0, ay = 0, az = 0;
         for (const bh of this.bhs) {
           const rx = star.body.pos[0] - bh.body.pos[0];
@@ -815,7 +815,11 @@ export class GalaxyRegime extends Regime {
           // Tidal-disruption: too-close encounter consumes the star
           const rT = TIDAL_K * Math.sqrt(bh.mass);
           if (dist < rT) {
-            star.state = 'dead';
+            // Tidally disrupted: the star is swallowed by the BH. This is a
+            // distinct fate from old-age death — no white-dwarf remnant and
+            // no new stellar BH, otherwise the star's sprite lingers pinned
+            // on top of the BH ("stars sticking to the SMBH").
+            star.state = 'absorbed';
             star.deathT = tG;
             // Pulse the BH's accretion disk to register the feeding event
             (bh.mesh as any).feedPulse = ((bh.mesh as any).feedPulse ?? 0) + 0.6;
@@ -827,7 +831,7 @@ export class GalaxyRegime extends Regime {
           const k    = -gObs / dist;
           ax += k * rx; ay += k * ry; az += k * rz;
         }
-        if (star.state === 'dead') continue;
+        if (star.state === 'absorbed') continue;
         star.body.vel[0] += dtSim * ax;
         star.body.vel[1] += dtSim * ay;
         star.body.vel[2] += dtSim * az;
@@ -856,7 +860,7 @@ export class GalaxyRegime extends Regime {
       // state-change thresholds, revert. Without this, dead stars stay
       // dead forever (and the white-dwarf cooling formula blows up with
       // negative sinceDeath, rendering them as giant glowing blobs).
-      if (s.state === 'dead' && tG < s.deathT) {
+      if ((s.state === 'dead' || s.state === 'absorbed') && tG < s.deathT) {
         s.state = (age >= s.lifetime * 0.97 && age < s.lifetime) ? 'giant' : 'main';
         s.deathT = Infinity;
         if (s.spawnedBH) {
@@ -902,6 +906,17 @@ export class GalaxyRegime extends Regime {
           s.state = 'dead';
           s.deathT = tG;
           this.spawnSNFlare(s, tG);
+        }
+      }
+      if (s.state === 'absorbed') {
+        // Swallowed by a BH: a brief tidal-shred flash, then gone for good.
+        // No remnant point and no spawned BH, so nothing lingers on the BH.
+        const sinceEaten = tG - s.deathT;
+        if (sinceEaten < FLASH_DURATION) {
+          const flash = 1 - sinceEaten / FLASH_DURATION;
+          r = 1.4 * flash + 0.15; g = 1.0 * flash + 0.10; b = 1.5 * flash + 0.25;
+        } else {
+          r = g = b = 0;
         }
       }
       if (s.state === 'dead') {
@@ -1170,8 +1185,9 @@ export class GalaxyRegime extends Regime {
       if (!s) return null;
       const r = Math.hypot(s.body.pos[0], s.body.pos[1], s.body.pos[2]);
       const v = Math.hypot(s.body.vel[0], s.body.vel[1], s.body.vel[2]);
-      const stateLabel = s.state === 'main'  ? 'main sequence'
-                       : s.state === 'giant' ? 'red giant'
+      const stateLabel = s.state === 'main'     ? 'main sequence'
+                       : s.state === 'giant'    ? 'red giant'
+                       : s.state === 'absorbed' ? 'consumed by BH'
                        : 'dead';
       const spectral = s.mass > 16  ? 'O' :
                        s.mass > 2.1 ? 'B' :
