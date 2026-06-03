@@ -11,7 +11,11 @@
   <canvas id="c"></canvas>
 
   <div id="hud-epoch">—</div>
-  <div id="hud-disclaimer" data-tip="Real Schwarzschild radii are ~10⁻⁹ to 10⁻¹¹ of host galaxy diameter. The hover card's r_s, T_H, S_BH labels are literal physics; the on-screen size is exaggerated so you can see the BH at all. Current visual scale-up is roughly 6×10⁸× — about half of the previous draft.">⚠ black holes drawn ~10⁸× oversized for visibility · labels are real</div>
+  <div id="hud-disclaimer" data-tip="The physics labels use literal Schwarzschild, Hawking, RAR, and closure formulas; the rendered black-hole disks are intentionally inflated because true radii would be far below one pixel at galaxy scale.">black holes are visibility-scaled · labels are physical</div>
+  <div id="scale-audit" data-tip="Current visual black-hole radii compared with true Schwarzschild radii assuming 1 simulation unit is roughly 1 kpc in galaxy view.">
+    <div class="scale-audit-title">BH scale audit</div>
+    <div id="scale-audit-rows"></div>
+  </div>
 
   <div id="ui">
     <!-- Row 1: transport + time + zoom -->
@@ -83,6 +87,14 @@
       </div>
 
       <div class="cluster">
+        <label class="select-wrap" data-tip="Low caps pixel ratio and disables lensing; Medium is the default hosted setting; High preserves the full local visual pass.">
+          <span class="select-label">quality</span>
+          <select id="quality-select">
+            <option value="low">Low</option>
+            <option value="medium">Medium</option>
+            <option value="high">High</option>
+          </select>
+        </label>
         <label class="select-wrap" data-tip="Pick a paper-derived dynamics example to view in isolation. Choose 'Live universe' to return to the main simulation.">
           <span class="select-label">scene</span>
           <select id="anchor-select">
