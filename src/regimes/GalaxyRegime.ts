@@ -25,7 +25,7 @@ import { imfSample, mainSeqLifetime, SUPERNOVA_MASS } from '../core/StellarLifec
 // pointer movement. Each point still represents ~10⁷ real solar
 // systems (Milky Way has ~3×10¹¹ stars) — see scale-vs-reality note
 // in the README.
-const N_STARS = 8000;
+const N_STARS = 16000;
 // Density-wave (precessing-ellipse) spiral parameters. ARM_TWIST sets the
 // spiral pitch (major-axis orientation in radians per unit guiding radius →
 // a 2-arm trailing pattern). PATTERN_FRAC sets the rigid pattern speed as a
@@ -432,11 +432,11 @@ export class GalaxyRegime extends Regime {
     this.starGeom.setAttribute('color', this.colAttr);
 
     this.starMaterial = new THREE.PointsMaterial({
-      // Each point is a whole solar system. Size 0.17 paired with the
-      // 8,000-star count gives a brighter surrounding field that
-      // balances the now-smaller BH. Additive blending + ACES tonemap
-      // still composite into a continuous bright wash at zoom-out.
-      size: 0.17, sizeAttenuation: true,
+      // Each point is a whole solar system. Finer size (0.13) paired with the
+      // denser 16,000-star count keeps individual points crisp while the field
+      // reads as a continuous spiral wash. Additive blending + ACES tonemap
+      // composite into a bright wash at zoom-out.
+      size: 0.13, sizeAttenuation: true,
       vertexColors: true,
       transparent: true, depthWrite: false, opacity: 1.0,
       blending: THREE.AdditiveBlending,
@@ -709,14 +709,24 @@ export class GalaxyRegime extends Regime {
   }
 
   private circularSpeed(r: number): number {
-    // RAR-consistent circular speed: v² / r = g_obs from central baryonic mass.
-    // Uses the same paper-faithful exponential RAR as the rest of the sim.
-    // If there's no central SMBH, use a soft bulge mass so outer rotation curve
-    // still falls into deep-MOND naturally (paper §14: Tully–Fisher follows).
-    const M = Math.max(this.centralMass(), 60);
-    const gBar = G_SIM * M / Math.max(r * r, 1e-3);
-    const y = gBar / A0_SIM;
-    const gObs = nuRAR(y) * gBar;
+    // Enclosed-mass RAR rotation curve. Mass = a softened central bulge
+    // (Plummer core, so no Keplerian cusp) + an exponential stellar disk. Both
+    // enclosed-mass terms grow from ~0 at the centre, so the curve RISES from
+    // the centre, peaks, then flattens — the real-galaxy shape — instead of the
+    // point-mass Keplerian decline. The paper's exponential RAR (§14) maps the
+    // enclosed baryonic g_bar to g_obs, so the deep-MOND Tully–Fisher tail
+    // (fixed by the TOTAL mass) is unchanged. No central SMBH → soft floor.
+    const Mtot    = Math.max(this.centralMass(), 60);
+    const Rd      = R_GAL * 0.28;                 // exponential disk scale length
+    const rc      = R_GAL * 0.06;                 // bulge core radius (softening)
+    const fBulge  = 0.25;                         // bulge fraction of total mass
+    const x       = r / Rd;
+    const diskEnc  = 1 - (1 + x) * Math.exp(-x);  // 0 at centre → 1 far out
+    const bulgeEnc = (r * r * r) / Math.pow(r * r + rc * rc, 1.5);  // Plummer, 0 → 1
+    const Menc    = Mtot * (fBulge * bulgeEnc + (1 - fBulge) * diskEnc);
+    const gBar    = G_SIM * Menc / Math.max(r * r, 1e-3);
+    const y       = gBar / A0_SIM;
+    const gObs    = nuRAR(y) * gBar;
     return Math.sqrt(gObs * Math.max(r, 0.1));
   }
 

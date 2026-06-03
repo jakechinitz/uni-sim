@@ -13,9 +13,10 @@ import { a as scaleFactor } from '../core/Cosmology';
 import { ManyPasts } from '../render/ManyPasts';
 import { visualRatePerWall } from '../util/timeScale';
 
-// N_GAL drives the dominant CPU cost: O(N²) per-pair RAR integration per
-// substep. 220 keeps the cosmic-web looking dense without choking the CPU.
-const N_GAL = 220;
+// N_GAL drives the dominant CPU cost: O(N²) per-pair RAR integration. It runs
+// at ~30 Hz (every other frame) with one substep, so 340 (~2.4x the pairs of
+// 220) stays well inside budget while giving a denser cosmic web.
+const N_GAL = 340;
 const BOX   = 60;        // sim units
 
 // Sim-internal gravity coupling chosen so visible motion is on order of seconds
