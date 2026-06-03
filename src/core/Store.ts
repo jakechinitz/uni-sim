@@ -2,6 +2,7 @@
 
 import type { RegimeKey } from './Camera';
 import { SPEED_EXP_DEFAULT } from '../util/units';
+import { detectDefaultQuality, type QualityLevel } from './Quality';
 
 // v3: speedExp is pure log-magnitude (forward); direction + playing
 // promoted to first-class fields so slow-mo doesn't masquerade as rewind.
@@ -16,6 +17,7 @@ export interface SaveData {
   speedExp: number;       // log10 of forward sim_sec/wall_sec
   direction: 1 | -1;      // +1 forward, -1 rewind (separate from speedExp)
   playing: boolean;       // play/pause state (separate from speed/direction)
+  quality?: QualityLevel; // optional so older v3 saves load cleanly
   // logPace: when true the Big Bang flow walks the time slider linearly
   // so the exponential scrub map spreads the early universe across
   // ~35 wall-sec. Resets to false the moment the user touches the
@@ -83,6 +85,7 @@ export function emptySave(seed: number): SaveData {
     speedExp: SPEED_EXP_DEFAULT,
     direction: 1,
     playing: true,
+    quality: detectDefaultQuality(),
     logPace: false,
     toggles: { entangle: false, disk: true, diskDetail: true, manyPasts: false }
   };

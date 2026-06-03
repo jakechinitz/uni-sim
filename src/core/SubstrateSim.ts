@@ -40,6 +40,13 @@ function idx(N: number, i: number, j: number, k: number) {
   return ((i + N) % N) + ((j + N) % N) * N + ((k + N) % N) * N * N;
 }
 
+function clampQ(value: number): number {
+  if (!Number.isFinite(value)) return 0;
+  if (value < 0) return 0;
+  if (value > 1) return 1;
+  return value;
+}
+
 export class SubstrateSim {
   N: number;
   q:  Float32Array;     // capacity, baseline = 1
@@ -81,22 +88,19 @@ export class SubstrateSim {
       const iy = Math.floor(d.y);
       const iz = Math.floor(d.z);
       const I = idx(N, ix, iy, iz);
-      q[I] = Math.max(0, q[I] - d.drainRate * dt);
+      q[I] = clampQ(q[I] - d.drainRate * dt);
     }
 
     // Update momenta from current q-gradient (forward differences)
     for (let k = 0; k < N; k++) {
-      const km = ((k + N - 1) % N) * N * N;
-      const kc = k * N * N;
       const kp = ((k + 1) % N) * N * N;
+      const kc = k * N * N;
       for (let j = 0; j < N; j++) {
-        const jm = ((j + N - 1) % N) * N;
-        const jc = j * N;
         const jp = ((j + 1) % N) * N;
+        const jc = j * N;
         for (let i = 0; i < N; i++) {
           const ic = i;
           const ip = (i + 1) % N;
-          const im = (i + N - 1) % N;
           const c  = kc + jc + ic;
           const gx = q[kc + jc + ip] - q[c];
           const gy = q[kc + jp + ic] - q[c];
@@ -106,8 +110,6 @@ export class SubstrateSim {
           Px[c] += a * (-D * gx - Px[c]);
           Py[c] += a * (-D * gy - Py[c]);
           Pz[c] += a * (-D * gz - Pz[c]);
-          // unused suppressor
-          if (false) { void(km); void(jm); void(im); }
         }
       }
     }
@@ -126,7 +128,7 @@ export class SubstrateSim {
           const div = (Px[c] - Px[kc + jc + im])
                     + (Py[c] - Py[kc + jm + ic])
                     + (Pz[c] - Pz[km + jc + ic]);
-          q[c] = Math.max(0, q[c] - dt * div);
+          q[c] = clampQ(q[c] - dt * div);
         }
       }
     }
@@ -141,7 +143,6 @@ export class SubstrateSim {
       const ip = (ix + 1) % N, im = (ix + N - 1) % N;
       const jp = (iy + 1) % N, jm = (iy + N - 1) % N;
       const kp = (iz + 1) % N, kmm = (iz + N - 1) % N;
-      const cc = idx(N, ix, iy, iz);
       const gx = (q[idx(N, ip, iy, iz)] - q[idx(N, im, iy, iz)]) * 0.5;
       const gy = (q[idx(N, ix, jp, iz)] - q[idx(N, ix, jm, iz)]) * 0.5;
       const gz = (q[idx(N, ix, iy, kp)] - q[idx(N, ix, iy, kmm)]) * 0.5;
@@ -152,7 +153,6 @@ export class SubstrateSim {
       d.x = (d.x + dt * d.vx + N) % N;
       d.y = (d.y + dt * d.vy + N) % N;
       d.z = (d.z + dt * d.vz + N) % N;
-      void(cc);
     }
 
     this.internalT += dt;
@@ -172,7 +172,7 @@ export class SubstrateSim {
       const rr = di * di + dj * dj + dk * dk;
       const g = amp * Math.exp(-rr / (2 * sigma * sigma));
       const c = idx(N, ix0 + di, iy0 + dj, iz0 + dk);
-      this.q[c]  = Math.max(0, this.q[c] - g);
+      this.q[c]  = clampQ(this.q[c] - g);
       this.Px[c] += g * ux;
       this.Py[c] += g * uy;
       this.Pz[c] += g * uz;
@@ -200,7 +200,7 @@ export class SubstrateSim {
     const c11 = c011 * (1 - tx) + c111 * tx;
     const c0  = c00  * (1 - ty) + c10  * ty;
     const c1  = c01  * (1 - ty) + c11  * ty;
-    return c0 * (1 - tz) + c1 * tz;
+    return clampQ(c0 * (1 - tz) + c1 * tz);
   }
 
   addDefect(x: number, y: number, z: number, drainRate = 0.3, id?: string): SimDefect {
@@ -215,12 +215,23 @@ export class SubstrateSim {
   }
 
   // Slowly relax q toward 1 everywhere — keeps the lattice from going dead
-  // after long defect interactions
+  // after long defect interactions.
   relax(rate: number, dt: number) {
     const k = Math.min(0.95, rate * dt);
     for (let i = 0; i < this.q.length; i++) {
-      this.q[i] += (1 - this.q[i]) * k;
+      this.q[i] = clampQ(this.q[i] + (1 - this.q[i]) * k);
     }
+  }
+
+  qRange(): { min: number; max: number } {
+    let min = Infinity;
+    let max = -Infinity;
+    for (let i = 0; i < this.q.length; i++) {
+      const v = this.q[i];
+      if (v < min) min = v;
+      if (v > max) max = v;
+    }
+    return { min, max };
   }
 
   // Count saturated cells (q < Q_SAT) — proxy for BH-like volume

@@ -1,5 +1,6 @@
 // Shared interface for every scale regime.
 import * as THREE from 'three';
+import type { QualitySettings } from '../core/Quality';
 // Focus carries the user's drill-down path through the zoom hierarchy:
 // "I'm looking at THIS galaxy in COSMIC", "this star in that galaxy", etc.
 // Each regime can both READ focus (so e.g. SystemRegime builds the star
@@ -21,6 +22,7 @@ export interface RegimeContext {
   manyPastsOn: boolean;    // §21 ghost-trajectory overlay (visible when rewinding)
   dtWall: number;          // wall-clock seconds since last frame (UI animations)
   rate: number;            // current sim_sec / wall_sec from the speed slider
+  quality: QualitySettings;
   focus: FocusState;
 }
 

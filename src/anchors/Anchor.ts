@@ -15,6 +15,7 @@
 //   3. Done — dropdown auto-populates.
 
 import * as THREE from 'three';
+import type { QualitySettings } from '../core/Quality';
 
 export interface AnchorMeta {
   id: string;            // Stable identifier, used as dropdown value + URL hash
@@ -28,6 +29,7 @@ export interface AnchorContext {
   playing: boolean;      // From the global play/pause state
   wallDt: number;        // Real seconds since last frame (UI animations)
   simDt: number;         // sim_sec / wall_sec × wallDt, signed by direction
+  quality: QualitySettings;
 }
 
 export abstract class Anchor {
