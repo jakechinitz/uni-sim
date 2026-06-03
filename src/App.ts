@@ -274,7 +274,7 @@ export class App {
     this.controls.enablePan = true;
     this.controls.screenSpacePanning = true;
     this.controls.rotateSpeed = 0.5;
-    this.controls.panSpeed = 0.8;
+    this.controls.panSpeed = 1.35;
     this.controls.target.set(0, 0, 0);
     if (oldDir) {
       const lim = REGIME_LIMITS[this.regimes.currentKey];
@@ -322,11 +322,14 @@ export class App {
     const focusPos = this.regimes.hasPin()
       ? this.regimes.current.focusedWorldPos(this.regimes.focus)
       : null;
-    const want = focusPos ?? this._originVec;
-    // Stronger lerp at higher intra so the target snaps to the focused
-    // object as we approach the next regime.
-    const lerpRate = 0.04 + 0.16 * slice.intra;
-    this.controls.target.lerp(want, Math.min(1, lerpRate));
+    // Steer the orbit target toward a pinned focus ONLY. With no pin, leave
+    // the target wherever the user right-click-panned it — don't yank it back
+    // to world origin each frame (that fought the pan). Stronger lerp at higher
+    // intra so the target snaps to the focused object near a regime boundary.
+    if (focusPos) {
+      const lerpRate = 0.04 + 0.16 * slice.intra;
+      this.controls.target.lerp(focusPos, Math.min(1, lerpRate));
+    }
 
     const dist = lim.max - (lim.max - lim.min) * slice.intra;
     const cam = this.regimes.current.camera;
@@ -336,7 +339,6 @@ export class App {
     dir.multiplyScalar(dist / curLen);
     cam.position.copy(this.controls.target).add(dir);
   }
-  private _originVec = new THREE.Vector3();
 
   // Wheel input is intercepted by the canvas listener (see constructor)
   // and routed into the unified zoom slider. deltaY < 0 (scroll up) = zoom
