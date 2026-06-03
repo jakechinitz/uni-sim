@@ -2,7 +2,11 @@ import * as THREE from 'three';
 import { GalaxyRegime } from './GalaxyRegime';
 import { SUPERNOVA_MASS } from '../core/StellarLifecycle';
 
-type PatchedGalaxy = GalaxyRegime & {
+// Structural view of the private internals this patch reaches into via the
+// prototype. NOT intersected with GalaxyRegime: those fields are `private`
+// there, and intersecting a private member with a public re-declaration
+// collapses the whole type to `never` (TS2339), which broke `npm run build`.
+type PatchedGalaxy = {
   stars?: any[];
   bhs?: any[];
   posAttr?: THREE.BufferAttribute;
