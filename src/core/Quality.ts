@@ -41,14 +41,18 @@ export function qualityForLevel(level: unknown): QualitySettings {
   return QUALITY_PRESETS.medium;
 }
 
+function mediaMatches(query: string): boolean {
+  return typeof window.matchMedia === 'function' && window.matchMedia(query).matches;
+}
+
 export function detectDefaultQuality(): QualityLevel {
   if (typeof navigator === 'undefined' || typeof window === 'undefined') return 'medium';
 
   const nav = navigator as Navigator & { deviceMemory?: number };
   const memoryLimited = typeof nav.deviceMemory === 'number' && nav.deviceMemory <= 4;
   const coreLimited = typeof navigator.hardwareConcurrency === 'number' && navigator.hardwareConcurrency <= 4;
-  const coarsePointer = window.matchMedia?.('(pointer: coarse)').matches ?? false;
-  const narrowViewport = window.matchMedia?.('(max-width: 760px)').matches ?? false;
+  const coarsePointer = mediaMatches('(pointer: coarse)');
+  const narrowViewport = mediaMatches('(max-width: 760px)');
 
   return memoryLimited || coreLimited || coarsePointer || narrowViewport ? 'low' : 'medium';
 }
