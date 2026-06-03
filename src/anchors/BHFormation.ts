@@ -6,16 +6,17 @@
 // distinctive ontological claim visible:
 //
 //   * Matter collapses inward (just Newtonian dust for visualization).
-//   * The substrate capacity field q drops in the centre.
+//   * The substrate capacity field q drops in the centre but remains bounded.
 //   * When q reaches 0 at some radius r_s, a horizon shell EMERGES —
 //     drawn as an opaque black sphere with a δS-driven photon ring.
 //   * The exterior remains an ordinary Schwarzschild-like geometry.
 //   * The story stops at the horizon; no singularity is drawn inside.
 //
 // What you see: cloud of dust particles collapsing → central q-field
-// reddening → horizon pops into existence and grows → particles that
-// fall through stop being rendered (they've "joined the horizon
-// degrees of freedom"). The exterior settles into a static profile.
+// reddening → bounded q-shell reaches q≈0 → horizon pops into existence
+// and grows → particles that fall through stop being rendered (they've
+// "joined the horizon degrees of freedom"). The exterior settles into a
+// static profile.
 
 import * as THREE from 'three';
 import { Anchor, AnchorContext } from './Anchor';
@@ -27,6 +28,8 @@ const CLOUD_R      = 9;          // initial cloud radius
 const TARGET_RS    = 1.0;        // final horizon radius (sim units)
 const G_DUST       = 0.6;        // sim gravitational coupling (visual)
 const COLLAPSE_DAMP = 0.985;     // light velocity damping so collapse isn't ballistic
+const MASS_TO_Q_ZERO = 12;       // visual mass scale at which q-shell saturates
+const HORIZON_Q_THRESHOLD = 0.02;
 
 export class BHFormationAnchor extends Anchor {
   private dust!: THREE.Points;
@@ -35,9 +38,11 @@ export class BHFormationAnchor extends Anchor {
   private dustColors!: Float32Array;
   private dustAlive!: Uint8Array;
   private centralMass = 0;                  // mass that has collapsed past r_s
+  private qFloor = 1;                       // bounded q minimum, 1 -> 0
   private hole: BlackHole | null = null;
   private holeRadius = 0;                   // grows as more dust falls in
   private capacityField!: THREE.Mesh;       // soft glowing ball showing q-drain
+  private horizonShell!: THREE.Mesh<THREE.SphereGeometry, THREE.MeshBasicMaterial>;
   private wallTime = 0;
   private collapseStartT = 1.0;             // wall-seconds before collapse begins
 
@@ -47,9 +52,9 @@ export class BHFormationAnchor extends Anchor {
       title: 'BH formation as saturation boundary',
       paperRef: '§15, §20',
       blurb:
-        'A dust cloud collapses. The substrate capacity q is drained at ' +
-        'the centre. When q → 0 a horizon SHELL forms — paper §20: the ' +
-        'manifold ends at q=0, no singular centre is drawn inside.',
+        'A dust cloud collapses. The bounded substrate capacity q is drained ' +
+        'toward the centre. When q reaches the q=0 free boundary a horizon ' +
+        'SHELL forms — no singular centre is drawn inside.',
       tier: 1
     }, aspect);
 
@@ -58,6 +63,7 @@ export class BHFormationAnchor extends Anchor {
 
     this.buildDust();
     this.buildCapacityField();
+    this.buildHorizonShell();
     this.buildStarBackdrop();
   }
 
@@ -117,6 +123,21 @@ export class BHFormationAnchor extends Anchor {
     this.scene.add(sprite);
   }
 
+  private buildHorizonShell() {
+    const g = new THREE.SphereGeometry(1, 56, 28);
+    const m = new THREE.MeshBasicMaterial({
+      color: 0x7ad7ff,
+      wireframe: true,
+      transparent: true,
+      depthWrite: false,
+      opacity: 0,
+      blending: THREE.AdditiveBlending,
+    });
+    this.horizonShell = new THREE.Mesh(g, m);
+    this.horizonShell.visible = false;
+    this.scene.add(this.horizonShell);
+  }
+
   private buildStarBackdrop() {
     const N = 250;
     const positions = new Float32Array(N * 3);
@@ -156,8 +177,13 @@ export class BHFormationAnchor extends Anchor {
     }
     this.holeRadius = 0;
     this.centralMass = 0;
+    this.qFloor = 1;
     this.wallTime = 0;
     (this.capacityField.material as THREE.SpriteMaterial).opacity = 0;
+    this.horizonShell.visible = false;
+    this.horizonShell.scale.setScalar(1);
+    this.horizonShell.material.opacity = 0;
+    this.horizonShell.material.color.set(0x7ad7ff);
     // Re-seed dust cloud
     for (let i = 0; i < N_DUST; i++) {
       const u = Math.random() * 2 - 1;
@@ -226,13 +252,25 @@ export class BHFormationAnchor extends Anchor {
     if (absorbed > 0) this.centralMass += absorbed * 0.3;
 
     // Pre-horizon capacity field: opacity grows with central density.
+    this.qFloor = Math.max(0, 1 - this.centralMass / MASS_TO_Q_ZERO);
+    const qDrain = 1 - this.qFloor;
+    const shellRadius = Math.max(0.08, TARGET_RS * Math.sqrt(qDrain));
     const matCap = this.capacityField.material as THREE.SpriteMaterial;
-    matCap.opacity = Math.min(0.85, cloudPeakDensity / 250);
+    matCap.opacity = Math.min(0.85, Math.max(cloudPeakDensity / 250, qDrain * 0.35));
     this.capacityField.scale.setScalar(0.8 + Math.min(2.2, this.centralMass / 30));
 
-    // Spawn the horizon shell once enough mass has collapsed. After that,
-    // the BlackHole mesh grows with centralMass, capping at TARGET_RS.
-    if (!this.hole && this.centralMass > 12) {
+    // Bounded free-boundary visual: q never overshoots below 0; the visible
+    // shell marks the radius where the q-floor is approaching saturation.
+    this.horizonShell.visible = qDrain > 0.08;
+    this.horizonShell.scale.setScalar(shellRadius);
+    this.horizonShell.material.opacity = this.qFloor <= HORIZON_Q_THRESHOLD
+      ? 0.52
+      : Math.min(0.28, qDrain * 0.24);
+    this.horizonShell.material.color.set(this.qFloor <= HORIZON_Q_THRESHOLD ? 0xffb070 : 0x7ad7ff);
+
+    // Spawn the horizon shell once the bounded q-front reaches q≈0. After
+    // that, the BlackHole mesh grows with the same free-boundary radius.
+    if (!this.hole && this.qFloor <= HORIZON_Q_THRESHOLD) {
       this.hole = new BlackHole({
         radius: 0.25, diskInner: 2.6, diskOuter: 6.5,
         diskTilt: 0.5,
@@ -241,13 +279,14 @@ export class BHFormationAnchor extends Anchor {
         cool: new THREE.Color('#a060ff')
       });
       this.scene.add(this.hole);
-      this.hole.setLocalQ(1.0);
-      // Fade capacity field out as the horizon takes over
+      this.hole.setLocalQ(Math.max(0.05, this.qFloor));
+      // Fade capacity field out as the horizon takes over.
       matCap.opacity = 0;
     }
     if (this.hole) {
-      this.holeRadius = Math.min(TARGET_RS, 0.25 + (this.centralMass - 12) * 0.012);
+      this.holeRadius = Math.min(TARGET_RS, Math.max(0.25, shellRadius));
       this.hole.scale.setScalar(this.holeRadius / 0.25);
+      this.hole.setLocalQ(Math.max(0.05, this.qFloor));
       this.hole.syncQField(this.hole.position, this.camera.position);
       this.hole.tick(this.wallTime);
     }

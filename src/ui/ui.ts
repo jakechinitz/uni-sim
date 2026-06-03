@@ -2,6 +2,8 @@
 
 import type { SaveData } from '../core/Store';
 import { downloadSave, readFile } from '../core/Store';
+import { qualityForLevel } from '../core/Quality';
+import { scaleAuditRows } from '../core/ScaleAudit';
 
 export interface UICallbacks {
   state: SaveData;
@@ -22,6 +24,28 @@ function el<T extends HTMLElement>(id: string): T {
   return document.getElementById(id) as T;
 }
 
+function renderScaleAuditPanel() {
+  const root = document.getElementById('scale-audit-rows');
+  if (!root) return;
+  root.textContent = '';
+  for (const item of scaleAuditRows()) {
+    const row = document.createElement('div');
+    row.className = 'scale-audit-row';
+
+    const label = document.createElement('span');
+    label.className = 'scale-label';
+    label.textContent = item.label;
+
+    const value = document.createElement('span');
+    value.className = 'scale-value';
+    value.textContent = item.factor;
+    value.dataset.tip = `${item.visual}; true-to-scale would be ${item.trueScale}`;
+
+    row.append(label, value);
+    root.appendChild(row);
+  }
+}
+
 export function bindUI(cb: UICallbacks) {
   const sliderTime  = el<HTMLInputElement>('slider-time');
   const sliderZoom  = el<HTMLInputElement>('slider-zoom');
@@ -37,6 +61,9 @@ export function bindUI(cb: UICallbacks) {
   const togDisk     = el<HTMLInputElement>('toggle-disk');
   const togDiskD    = el<HTMLInputElement>('toggle-disk-detail');
   const togMP       = el<HTMLInputElement>('toggle-manypasts');
+  const qualitySel  = document.getElementById('quality-select') as HTMLSelectElement | null;
+
+  renderScaleAuditPanel();
 
   // Init from state. paintTransport / refreshPresetState rely on `chips`
   // being declared, so we set up the chip refs BEFORE the first repaint
@@ -55,6 +82,8 @@ export function bindUI(cb: UICallbacks) {
     refreshPresetState(cb.state.speedExp);
   }
 
+  cb.state.quality = qualityForLevel(cb.state.quality).level;
+  if (qualitySel) qualitySel.value = cb.state.quality;
   sliderTime.value  = String(cb.state.scrub);
   sliderZoom.value  = String(cb.state.zoom);
   sliderSpeed.value = String(cb.state.speedExp);
@@ -88,6 +117,13 @@ export function bindUI(cb: UICallbacks) {
     paintTransport();
     cb.onChange();
   });
+  if (qualitySel) {
+    qualitySel.addEventListener('change', () => {
+      cb.state.quality = qualityForLevel(qualitySel.value).level;
+      qualitySel.value = cb.state.quality;
+      cb.onChange();
+    });
+  }
   btnPlay.addEventListener('click', () => {
     cb.state.playing = !cb.state.playing;
     paintTransport();
@@ -226,11 +262,16 @@ export function updateAnchorPanel(
 }
 
 export function syncControls(state: SaveData) {
+  state.quality = qualityForLevel(state.quality).level;
   (el<HTMLInputElement>('slider-time')).value  = String(state.scrub);
   (el<HTMLInputElement>('slider-zoom')).value  = String(state.zoom);
   (el<HTMLInputElement>('slider-speed')).value = String(state.speedExp);
   (el<HTMLInputElement>('toggle-entangle')).checked = state.toggles.entangle;
   (el<HTMLInputElement>('toggle-disk')).checked     = state.toggles.disk ?? true;
+  (el<HTMLInputElement>('toggle-disk-detail')).checked = state.toggles.diskDetail ?? true;
+  (el<HTMLInputElement>('toggle-manypasts')).checked   = state.toggles.manyPasts ?? false;
+  const qualitySel = document.getElementById('quality-select') as HTMLSelectElement | null;
+  if (qualitySel) qualitySel.value = state.quality;
   (el<HTMLButtonElement>('btn-play')).textContent = state.playing ? '⏸' : '▶';
   (el<HTMLButtonElement>('btn-rewind')).classList.toggle('on',  state.direction === -1 && state.playing);
   (el<HTMLButtonElement>('btn-forward')).classList.toggle('on', state.direction ===  1 && state.playing);

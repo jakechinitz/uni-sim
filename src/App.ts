@@ -15,6 +15,7 @@ import { DragController } from './core/Drag';
 import { formatRate } from './util/units';
 import type { RegimeKey } from './core/Camera';
 import { AnchorManager } from './anchors/AnchorManager';
+import { qualityForLevel } from './core/Quality';
 
 // Camera-distance range per regime — wheel zooms within this range, then
 // the slider crosses a band boundary and the next regime mounts with the
@@ -49,7 +50,7 @@ export class App {
       canvas, antialias: false, alpha: false,
       powerPreference: 'high-performance'
     });
-    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.5));
     this.renderer.setClearColor(0x000000, 1);
     // HDR tone mapping. Without this, the bright PointLight in SystemRegime
     // clips planet surface colors to white near the star and pitch-black
@@ -62,24 +63,26 @@ export class App {
     this.renderer.toneMappingExposure = 1.25;
     this.resize();
 
-    // Pristine state, then overlay any save
+    // Pristine state, then overlay any save.
     const saved = loadLocal();
     this.state = saved ?? emptySave((Math.random() * 1e9) | 0);
+    this.state.quality = qualityForLevel(this.state.quality).level;
 
-    // Mirror state into clock
+    // Mirror state into clock.
     this.clock.scrub     = this.state.scrub;
     this.clock.speedExp  = this.state.speedExp;
     this.clock.direction = this.state.direction;
     this.clock.playing   = this.state.playing;
     this.clock.useLogPace = this.state.logPace ?? false;
 
-    // Dummy scene/camera for composer init
+    // Dummy scene/camera for composer init.
     const dummyScene = new THREE.Scene();
     const dummyCam = new THREE.PerspectiveCamera();
     this.composer = new Composer(this.renderer, dummyScene, dummyCam);
 
     this.regimes = new RegimeManager(this.renderer, this.composer, this.state.seed);
     this.anchors = new AnchorManager(window.innerWidth / window.innerHeight);
+    this.applyQuality();
 
     // DragController is registered FIRST so its pointerdown handler runs
     // before OrbitControls' — when it grabs an object it stopImmediatePropagation
@@ -124,6 +127,8 @@ export class App {
     bindUI({
       state: this.state,
       onChange: () => {
+        this.state.quality = qualityForLevel(this.state.quality).level;
+        this.applyQuality();
         this.clock.scrub      = this.state.scrub;
         this.clock.speedExp   = this.state.speedExp;
         this.clock.direction  = this.state.direction;
@@ -133,7 +138,9 @@ export class App {
         autosave(this.state);
       },
       onLoad: (data) => {
+        data.quality = qualityForLevel(data.quality).level;
         this.state = data;
+        this.applyQuality();
         this.clock.scrub      = data.scrub;
         this.clock.speedExp   = data.speedExp;
         this.clock.direction  = data.direction;
@@ -141,7 +148,7 @@ export class App {
         this.clock.useLogPace = data.logPace ?? false;
         this.regimes.setSeed(data.seed);          // also resets focus
         this.regimes.setZoom(data.zoom);
-        syncControls(data);
+        syncControls(this.state);
         autosave(this.state);
       },
       onNewSeed: () => {
@@ -200,6 +207,18 @@ export class App {
     });
 
     this.loop();
+  }
+
+  private currentQuality() {
+    return qualityForLevel(this.state.quality);
+  }
+
+  private applyQuality() {
+    const quality = this.currentQuality();
+    this.state.quality = quality.level;
+    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, quality.pixelRatioCap));
+    if (this.composer) this.composer.enableLens(quality.lensing);
+    this.resize();
   }
 
   // Convert a clicked draggable's id into a focus pin on the right
@@ -330,6 +349,7 @@ export class App {
   private loop = () => {
     requestAnimationFrame(this.loop);
     const { dtWall, dtSim } = this.clock.tick();
+    const quality = this.currentQuality();
 
     // sync state from clock
     this.state.scrub     = this.clock.scrub;
@@ -367,11 +387,12 @@ export class App {
     // we skip the regime flow entirely and just step + render the anchor.
     const anchor = this.anchors.current;
     if (anchor) {
-      anchor.update({ playing: this.clock.playing, wallDt: dtWall, simDt: dtSim });
+      anchor.update({ playing: this.clock.playing, wallDt: dtWall, simDt: dtSim, quality });
       // Keep OrbitControls' damping/rotation alive each frame.
       if (this.controls) this.controls.update();
       // Anchors that include BHs publish lens sources just like regimes.
-      this.composer.setLensSources(anchor.camera, anchor.lensSources());
+      const lensSources = quality.lensing ? anchor.lensSources().slice(0, quality.maxLensSources) : [];
+      this.composer.setLensSources(anchor.camera, lensSources);
       this.composer.setScene(anchor.scene, anchor.camera);
       this.composer.render(dtWall);
     } else {
@@ -394,6 +415,7 @@ export class App {
         manyPastsOn: (this.state.toggles.manyPasts ?? false) && this.clock.direction === -1 && this.clock.playing,
         dtWall,
         rate: this.clock.speed,
+        quality,
         focus: this.regimes.focus
       }, dtSim);
 
@@ -402,7 +424,8 @@ export class App {
         this.applySliderDistance();
       }
       // Feed BH lens sources into the post-process for the current camera.
-      this.composer.setLensSources(this.regimes.current.camera, this.regimes.current.lensSources());
+      const lensSources = quality.lensing ? this.regimes.current.lensSources().slice(0, quality.maxLensSources) : [];
+      this.composer.setLensSources(this.regimes.current.camera, lensSources);
       this.regimes.render(dtWall);
     }
 
