@@ -34,6 +34,9 @@ const N_STARS = 16000;
 const ARM_TWIST = 0.32;
 const PATTERN_FRAC = 0.85;
 const ARM_ECC_MAX = 0.42;
+// Damping ratio for the transient disk slosh when the SMBH is dragged. ~0.25 is
+// underdamped — a couple of visible oscillations, then it settles.
+const SLOSH_DAMP = 0.25;
 const R_GAL   = 18;
 const G_SIM   = 0.0008;
 const A0_SIM  = 0.00010;
@@ -87,6 +90,12 @@ interface Star {
   omega: number;       // streaming rate Ω(r)=v(r)/r around the ellipse
   phase0: number;      // phase around the ellipse at t=0
   yOff: number;        // vertical disk offset (held constant)
+  // Transient slosh: a damped epicyclic perturbation off the equilibrium orbit.
+  // Kicked when the SMBH is dragged, then decays back to zero (bounded, so no
+  // winding/dispersal). Frequency ∝ omega, so inner stars re-settle fast and
+  // outer stars lag → the disk warps and recovers like a real perturbed disk.
+  qx: number; qy: number; qz: number;   // perturbation offset
+  ux: number; uy: number; uz: number;   // perturbation velocity
 }
 
 
@@ -125,6 +134,9 @@ export class GalaxyRegime extends Regime {
   // Central mass the per-star rotation rates were last computed for; when it
   // changes (a merger), every star's Ω(r) is refreshed so the curve updates.
   private lastRotMass = -1;
+  // Previous SMBH position — its per-frame motion drives the transient slosh.
+  private prevCx = 0; private prevCy = 0; private prevCz = 0;
+  private centerInit = false;
   private telegrapher = new TelegrapherField(2.0, new THREE.Color(0x9ee0ff));
   private manyPasts = new ManyPasts(new THREE.Color(0x9b8dff), 2.5);
   // Supernova flare pool — when a massive star dies it spawns one of
@@ -426,6 +438,7 @@ export class GalaxyRegime extends Regime {
         spawnedBH: false,
         gr, ecc, omega, phase0,
         yOff: y,
+        qx: 0, qy: 0, qz: 0, ux: 0, uy: 0, uz: 0,
       });
     }
 
@@ -880,6 +893,13 @@ export class GalaxyRegime extends Regime {
         s.omega = newOmega;
       }
     }
+    // SMBH motion since last frame drives the transient slosh.
+    if (!this.centerInit) { this.prevCx = cx; this.prevCy = cy; this.prevCz = cz; this.centerInit = true; }
+    const dcx = cx - this.prevCx, dcy = cy - this.prevCy, dcz = cz - this.prevCz;
+    this.prevCx = cx; this.prevCy = cy; this.prevCz = cz;
+    // Stable step for the slosh oscillator (semi-implicit Euler is stable for
+    // ω·dt < 2; clamp so a high time-speed frame can't blow it up).
+    const pdt = Math.min(Math.abs(visDt), 0.4);
     const rCo = 0.55 * R_GAL;                                   // co-rotation radius
     const patternOmega = (this.circularSpeed(rCo) / rCo) * PATTERN_FRAC;
     const patternRot = patternOmega * tOrb;
@@ -888,7 +908,19 @@ export class GalaxyRegime extends Regime {
       const phi = ARM_TWIST * star.gr + patternRot;   // arm (major-axis) angle
       const ang = star.phase0 + star.omega * tOrb;     // streaming around ellipse
       const [ox, oz] = this.dwPos(star.gr, star.ecc, ang, phi);
-      const px = ox + cx, py = star.yOff + cy, pz = oz + cz;   // anchor to SMBH
+      const ex = ox + cx, ey = star.yOff + cy, ez = oz + cz;   // equilibrium (anchored to SMBH)
+      // SMBH moved → shift the perturbation by −Δ so the star doesn't teleport;
+      // then relax it as a damped oscillator (frequency ∝ ω(r), so inner stars
+      // re-settle fast, outer stars lag → the disk warps and recovers).
+      star.qx -= dcx; star.qy -= dcy; star.qz -= dcz;
+      const w = star.omega, k = w * w, damp = 2 * SLOSH_DAMP * w;
+      star.ux += (-k * star.qx - damp * star.ux) * pdt;
+      star.uy += (-k * star.qy - damp * star.uy) * pdt;
+      star.uz += (-k * star.qz - damp * star.uz) * pdt;
+      star.qx += star.ux * pdt;
+      star.qy += star.uy * pdt;
+      star.qz += star.uz * pdt;
+      const px = ex + star.qx, py = ey + star.qy, pz = ez + star.qz;
       star.body.pos[0] = px;
       star.body.pos[1] = py;
       star.body.pos[2] = pz;
