@@ -33,8 +33,8 @@ export function runPhysicsSelfTest(): void {
   const closure = computeClosure();
   checks.push({
     name: 'Closure produces observed constants',
-    pass: Math.abs(closure.G_dev_pct) < 2 && closure.a0 > 1e-11 && closure.a0 < 2e-10,
-    details: `G_dev=${closure.G_dev_pct.toFixed(3)}%, a0=${closure.a0.toExponential(3)}`,
+    pass: Math.abs(closure.G_dev_pct) < 2 && closure.a_0 > 1e-11 && closure.a_0 < 2e-10,
+    details: `G_dev=${closure.G_dev_pct.toFixed(3)}%, a0=${closure.a_0.toExponential(3)}`,
   });
 
   const radiation = traceChi(1e-8);
