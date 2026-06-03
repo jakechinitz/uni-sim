@@ -1,3 +1,4 @@
+import './regimes/GalaxyRuntimePatch';
 import { App } from './App';
 import { runPhysicsSelfTest } from './core/physicsSelfTest';
 import { installTooltips } from './ui/Tooltip';
