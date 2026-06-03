@@ -48,9 +48,9 @@ export function runPhysicsSelfTest(): void {
 
   const substrate = new SubstrateSim(5);
   substrate.addDefect(2, 2, 2, 8);
-  substrate.emitPacket(2, 2, 2, 20);
+  substrate.emitPacket(2, 2, 2, 1, 0, 0, 0.35);
   for (let i = 0; i < 24; i++) substrate.step(0.04);
-  substrate.relax(0.5);
+  substrate.relax(0.5, 0.5);
   const q = substrate.qRange();
   checks.push({
     name: 'Substrate q remains bounded',
