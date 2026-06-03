@@ -395,6 +395,9 @@ export class SystemRegime extends Regime {
     // Fade the original star sprite away
     starMat.opacity = 0;
     this.starMesh.visible = false;
+    // Dead star no longer glows — hide its photon field (folded in from the
+    // former SystemRuntimePatch "tone down death remnants").
+    this.photons.setVisible(false);
     // Telegrapher ringdown — visible at slow-mo as the death blast
     this.telegrapher.emit(
       new THREE.Vector3(this.starBody.pos[0], this.starBody.pos[1], this.starBody.pos[2]),
@@ -412,6 +415,9 @@ export class SystemRegime extends Regime {
       });
       this.remnant.position.set(this.starBody.pos[0], this.starBody.pos[1], this.starBody.pos[2]);
       this.scene.add(this.remnant);
+      // Keep the remnant small so it reads as a stellar BH, not a star
+      // substitute (folded in from SystemRuntimePatch).
+      this.remnant.scale.setScalar(0.5);
       // A black-hole remnant should not leave a bright red point light.
       this.starLight.intensity = 1.2;
       this.starLight.color.set(0x304050);
@@ -426,8 +432,10 @@ export class SystemRegime extends Regime {
       wd.scale.setScalar(this.starBaseScale * 0.22);
       wd.position.set(this.starBody.pos[0], this.starBody.pos[1], this.starBody.pos[2]);
       this.scene.add(wd);
-      this.starLight.intensity = 8;
-      this.starLight.color.set(0xccddff);
+      // Toned-down post-death lighting (folded in from SystemRuntimePatch) —
+      // the faint white-dwarf sprite carries the light, not the point lamp.
+      this.starLight.intensity = 1.2;
+      this.starLight.color.set(0x304050);
     }
     // Drop the gravitating mass so planets feel a weaker pull and drift
     this.starBody.mass *= 0.30;
