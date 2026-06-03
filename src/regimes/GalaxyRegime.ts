@@ -122,6 +122,9 @@ export class GalaxyRegime extends Regime {
   // based on the cosmic-time gap since last update.
   private silentCatchup = true;
   private lastSeenCosmicT = -1;
+  // Central mass the per-star rotation rates were last computed for; when it
+  // changes (a merger), every star's Ω(r) is refreshed so the curve updates.
+  private lastRotMass = -1;
   private telegrapher = new TelegrapherField(2.0, new THREE.Color(0x9ee0ff));
   private manyPasts = new ManyPasts(new THREE.Color(0x9b8dff), 2.5);
   // Supernova flare pool — when a massive star dies it spawns one of
@@ -858,6 +861,25 @@ export class GalaxyRegime extends Regime {
     // swallowed (feeds the BH), exactly as before.
     const TIDAL_K = 0.055;      // r_tidal = TIDAL_K * sqrt(M) — feeding cue
     const tOrb = this.time;
+    // The disk is anchored to the central SMBH: stars orbit wherever it is, so
+    // dragging the SMBH carries the whole rotating disk with it. And if the
+    // central mass changes (a merger), refresh every star's streaming rate Ω(r)
+    // so the rotation curve itself updates, not just the centre.
+    const centralBH = this.bhs.find(b => b.isCentral);
+    const cx = centralBH ? centralBH.body.pos[0] : 0;
+    const cy = centralBH ? centralBH.body.pos[1] : 0;
+    const cz = centralBH ? centralBH.body.pos[2] : 0;
+    const cm = this.centralMass();
+    if (cm !== this.lastRotMass) {
+      this.lastRotMass = cm;
+      for (const s of this.stars) {
+        const newOmega = this.circularSpeed(s.gr) / Math.max(s.gr, 0.1);
+        // Preserve the current orbital phase so the rate change is smooth — ang
+        // = phase0 + omega*t would otherwise jump (t is large) and teleport stars.
+        s.phase0 += (s.omega - newOmega) * tOrb;
+        s.omega = newOmega;
+      }
+    }
     const rCo = 0.55 * R_GAL;                                   // co-rotation radius
     const patternOmega = (this.circularSpeed(rCo) / rCo) * PATTERN_FRAC;
     const patternRot = patternOmega * tOrb;
@@ -865,13 +887,14 @@ export class GalaxyRegime extends Regime {
       if (star.state === 'absorbed') continue;
       const phi = ARM_TWIST * star.gr + patternRot;   // arm (major-axis) angle
       const ang = star.phase0 + star.omega * tOrb;     // streaming around ellipse
-      const [px, pz] = this.dwPos(star.gr, star.ecc, ang, phi);
+      const [ox, oz] = this.dwPos(star.gr, star.ecc, ang, phi);
+      const px = ox + cx, py = star.yOff + cy, pz = oz + cz;   // anchor to SMBH
       star.body.pos[0] = px;
-      star.body.pos[1] = star.yOff;
+      star.body.pos[1] = py;
       star.body.pos[2] = pz;
       for (const bh of this.bhs) {
         const rx = px - bh.body.pos[0];
-        const ry = star.yOff - bh.body.pos[1];
+        const ry = py - bh.body.pos[1];
         const rz = pz - bh.body.pos[2];
         const rT = TIDAL_K * Math.sqrt(bh.mass);
         if (rx * rx + ry * ry + rz * rz < rT * rT) {
@@ -882,6 +905,9 @@ export class GalaxyRegime extends Regime {
         }
       }
     }
+    // Keep the spiral-shader disk centred on the SMBH too, so the whole galaxy
+    // moves coherently when the central BH is dragged.
+    this.spiralMesh.position.set(cx, cy, cz);
     // Push positions + lifecycle-driven colors into the point cloud.
     // Per-star: compute age, redden+brighten as we approach the lifetime,
     // then either flash (supernova → spawn a new stellar BH) or fade
