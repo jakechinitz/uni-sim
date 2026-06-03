@@ -24,6 +24,14 @@ import { imfSample, mainSeqLifetime, SUPERNOVA_MASS } from '../core/StellarLifec
 // systems (Milky Way has ~3×10¹¹ stars) — see scale-vs-reality note
 // in the README.
 const N_STARS = 8000;
+// Density-wave (precessing-ellipse) spiral parameters. ARM_TWIST sets the
+// spiral pitch (major-axis orientation in radians per unit guiding radius →
+// a 2-arm trailing pattern). PATTERN_FRAC sets the rigid pattern speed as a
+// fraction of the co-rotation orbital rate. ARM_ECC_MAX caps the ellipse
+// eccentricity (arm sharpness) at the disk edge. See GalaxyRegime.update().
+const ARM_TWIST = 0.32;
+const PATTERN_FRAC = 0.85;
+const ARM_ECC_MAX = 0.42;
 const R_GAL   = 18;
 const G_SIM   = 0.0008;
 const A0_SIM  = 0.00010;
@@ -70,6 +78,13 @@ interface Star {
   state: 'main' | 'giant' | 'dead' | 'absorbed';
   deathT: number;      // cosmic Gyr when it died/was eaten (Infinity if alive)
   spawnedBH: boolean;  // true once we've added a stellar BH from a supernova
+  // Density-wave (precessing-ellipse) orbit — drives the star analytically in
+  // update() instead of free integration, so the spiral can't wind or disperse.
+  gr: number;          // guiding radius (ellipse semi-major axis)
+  ecc: number;         // ellipse eccentricity (sets local arm sharpness)
+  omega: number;       // streaming rate Ω(r)=v(r)/r around the ellipse
+  phase0: number;      // phase around the ellipse at t=0
+  yOff: number;        // vertical disk offset (held constant)
 }
 
 
@@ -352,17 +367,18 @@ export class GalaxyRegime extends Regime {
     const colors    = new Float32Array(N_STARS * 3);
 
     for (let i = 0; i < N_STARS; i++) {
-      // log-spiral seeded distribution; bulge concentrated at small r
+      // Density-wave spiral seed. Bulge-concentrated guiding radius; each star
+      // rides a precessing ellipse whose major axis twists with radius (that
+      // twist is the 2-arm pattern). Eccentricity grows outward so the bulge
+      // stays round and the outer arms read sharply.
       const u = rng();
-      const r = R_GAL * (0.05 + 0.95 * Math.pow(u, 0.65));
-      const arm = (rng() < 0.6) ? 1 : 0;
-      const base = (Math.floor(rng() * 2) === 0) ? 0 : Math.PI; // 2-arm
-      const armPhase = base + 0.55 * Math.log(Math.max(r, 0.1)) - 4.1 * Math.log(Math.max(r / R_GAL, 0.01));
-      const jitter = (rng() - 0.5) * (arm ? 0.5 : Math.PI * 2);
-      const theta = armPhase + jitter;
-      const x = r * Math.cos(theta);
-      const z = r * Math.sin(theta);
-      const y = (rng() - 0.5) * 0.5 * Math.exp(-r / 6);
+      const gr = R_GAL * (0.05 + 0.95 * Math.pow(u, 0.65));
+      const ecc = ARM_ECC_MAX * Math.min(1, gr / R_GAL);
+      const phase0 = rng() * Math.PI * 2;
+      const omega = this.circularSpeed(gr) / Math.max(gr, 0.1);
+      const phi0 = ARM_TWIST * gr;            // pattern (major-axis) angle at t=0
+      const [x, z] = this.dwPos(gr, ecc, phase0, phi0);
+      const y = (rng() - 0.5) * 0.5 * Math.exp(-gr / 6);
 
       positions[i * 3 + 0] = x;
       positions[i * 3 + 1] = y;
@@ -372,7 +388,7 @@ export class GalaxyRegime extends Regime {
       // ~6% of stars get an HDR boost (>1.0) so they punch through the
       // ACES tonemap as bright sparkle — reads as the brightest local
       // suns, makes the disk feel populated rather than dust-like.
-      const hue = (r < 4) ? 0.07 + 0.05 * rng() : 0.58 + 0.08 * rng();
+      const hue = (gr < 4) ? 0.07 + 0.05 * rng() : 0.58 + 0.08 * rng();
       const sat = 0.5 + 0.3 * rng();
       const lit = 0.78 + 0.22 * rng();
       const c = new THREE.Color().setHSL(hue, sat, lit);
@@ -381,13 +397,14 @@ export class GalaxyRegime extends Regime {
       colors[i * 3 + 1] = c.g;
       colors[i * 3 + 2] = c.b;
 
-      // Initial velocity — set to RAR-circular for stability
-      const vCirc = this.circularSpeed(r);
-      const tx = -Math.sin(theta), tz = Math.cos(theta);
+      // Initial velocity — tangential RAR-circular speed (display only; the
+      // motion itself is prescribed analytically in update()).
+      const vCirc = this.circularSpeed(gr);
+      const thetaInit = Math.atan2(z, x);
       const body: Body = {
         id: `star-${i}`,
         pos: [x, y, z],
-        vel: [tx * vCirc, 0, tz * vCirc],
+        vel: [-Math.sin(thetaInit) * vCirc, 0, Math.cos(thetaInit) * vCirc],
         mass: 0.0001    // negligible relative to BH; stars are test particles
       };
       // Stellar lifecycle. Mass from Salpeter IMF; birth time spread across
@@ -401,7 +418,9 @@ export class GalaxyRegime extends Regime {
         lifetime: mainSeqLifetime(mass),
         state: 'main',
         deathT: Infinity,
-        spawnedBH: false
+        spawnedBH: false,
+        gr, ecc, omega, phase0,
+        yOff: y,
       });
     }
 
@@ -699,6 +718,18 @@ export class GalaxyRegime extends Regime {
     return Math.sqrt(gObs * Math.max(r, 0.1));
   }
 
+  // Density-wave star position: the point at parameter `ang` on an ellipse of
+  // semi-major `gr` and eccentricity `ecc` whose major axis points at angle
+  // `phi`, returned as [x, z] in the galaxy plane. Arc-speed is slowest near
+  // the major-axis tips, so stars crowd there — that crowding is the arm.
+  // Rotating `phi` rigidly rotates the whole spiral without winding it.
+  private dwPos(gr: number, ecc: number, ang: number, phi: number): [number, number] {
+    const ex = gr * Math.cos(ang);
+    const ey = gr * (1 - ecc) * Math.sin(ang);
+    const cphi = Math.cos(phi), sphi = Math.sin(phi);
+    return [ex * cphi - ey * sphi, ex * sphi + ey * cphi];
+  }
+
   update(ctx: RegimeContext, dt: number): void {
     // Detect first-tick or cache-restore catch-up: if cosmic time jumped
     // more than ~1 Myr since the last update we saw, suppress visuals
@@ -802,48 +833,41 @@ export class GalaxyRegime extends Regime {
       this.mergeBHs();
     }
 
-    // Stars under combined BH gravity (RAR — paper §14). Each star feels
-    // every surviving BH (central SMBH + stellar remnants). If a star
-    // wanders inside a BH's tidal radius, it's disrupted: marked dead
-    // (death flash will fire next frame) and the BH disk brightens
-    // transiently.
-    const TIDAL_K = 0.055;      // r_tidal = TIDAL_K * sqrt(M) — visual cue
-    for (let s = 0; s < sub; s++) {
-      for (const star of this.stars) {
-        if (star.body.fixed || star.state === 'dead' || star.state === 'absorbed') continue;
-        let ax = 0, ay = 0, az = 0;
-        for (const bh of this.bhs) {
-          const rx = star.body.pos[0] - bh.body.pos[0];
-          const ry = star.body.pos[1] - bh.body.pos[1];
-          const rz = star.body.pos[2] - bh.body.pos[2];
-          const r2 = rx * rx + ry * ry + rz * rz + 1e-3;
-          const dist = Math.sqrt(r2);
-          // Tidal-disruption: too-close encounter consumes the star
-          const rT = TIDAL_K * Math.sqrt(bh.mass);
-          if (dist < rT) {
-            // Tidally disrupted: the star is swallowed by the BH. This is a
-            // distinct fate from old-age death — no white-dwarf remnant and
-            // no new stellar BH, otherwise the star's sprite lingers pinned
-            // on top of the BH ("stars sticking to the SMBH").
-            star.state = 'absorbed';
-            star.deathT = tG;
-            // Pulse the BH's accretion disk to register the feeding event
-            (bh.mesh as any).feedPulse = ((bh.mesh as any).feedPulse ?? 0) + 0.6;
-            break;
-          }
-          const gBar = G_SIM * bh.mass / r2;
-          const y    = gBar / A0_SIM;
-          const gObs = nuRAR(y) * gBar;
-          const k    = -gObs / dist;
-          ax += k * rx; ay += k * ry; az += k * rz;
+    // Stars ride a density-wave (precessing-ellipse) kinematic spiral rather
+    // than free orbits. The paper's flat rotation curve (§14) means a spiral
+    // made of *material* stars on circular orbits winds up and shears away
+    // (the winding problem) — and free integration at high time-speed also lets
+    // the disk numerically disperse. Instead, the 2-arm pattern (each star's
+    // ellipse major-axis orientation) rotates RIGIDLY at patternOmega, so the
+    // arms never wind; meanwhile each star streams around its own ellipse at its
+    // true RAR rate Ω(r), so motion stays differential. Positions are
+    // closed-form and bounded, so the disk can neither wind out nor disperse at
+    // any speed. If an orbit carries a star inside a BH's tidal radius it is
+    // swallowed (feeds the BH), exactly as before.
+    const TIDAL_K = 0.055;      // r_tidal = TIDAL_K * sqrt(M) — feeding cue
+    const tOrb = this.time;
+    const rCo = 0.55 * R_GAL;                                   // co-rotation radius
+    const patternOmega = (this.circularSpeed(rCo) / rCo) * PATTERN_FRAC;
+    const patternRot = patternOmega * tOrb;
+    for (const star of this.stars) {
+      if (star.state === 'absorbed') continue;
+      const phi = ARM_TWIST * star.gr + patternRot;   // arm (major-axis) angle
+      const ang = star.phase0 + star.omega * tOrb;     // streaming around ellipse
+      const [px, pz] = this.dwPos(star.gr, star.ecc, ang, phi);
+      star.body.pos[0] = px;
+      star.body.pos[1] = star.yOff;
+      star.body.pos[2] = pz;
+      for (const bh of this.bhs) {
+        const rx = px - bh.body.pos[0];
+        const ry = star.yOff - bh.body.pos[1];
+        const rz = pz - bh.body.pos[2];
+        const rT = TIDAL_K * Math.sqrt(bh.mass);
+        if (rx * rx + ry * ry + rz * rz < rT * rT) {
+          star.state = 'absorbed';
+          star.deathT = tG;
+          (bh.mesh as any).feedPulse = ((bh.mesh as any).feedPulse ?? 0) + 0.6;
+          break;
         }
-        if (star.state === 'absorbed') continue;
-        star.body.vel[0] += dtSim * ax;
-        star.body.vel[1] += dtSim * ay;
-        star.body.vel[2] += dtSim * az;
-        star.body.pos[0] += dtSim * star.body.vel[0];
-        star.body.pos[1] += dtSim * star.body.vel[1];
-        star.body.pos[2] += dtSim * star.body.vel[2];
       }
     }
     // Push positions + lifecycle-driven colors into the point cloud.
