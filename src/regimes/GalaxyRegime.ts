@@ -1,5 +1,7 @@
-// GALAXY: spiral disk + central BH. Stars draggable; orbits use RAR so outer disk
-// has flat rotation curve (paper §14 — no dark matter needed).
+// GALAXY: spiral disk + central BH. Stars ride a density-wave (precessing-
+// ellipse) spiral — the arms rotate rigidly while stars stream differentially
+// at the paper's flat RAR rotation curve (§14 — no dark matter needed). BHs are
+// draggable; stars are click-to-focus.
 
 import * as THREE from 'three';
 import { Regime, RegimeContext, DragTarget, HoverInfo, FocusState } from './Regime';

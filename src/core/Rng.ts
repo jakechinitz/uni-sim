@@ -12,17 +12,6 @@ export function mulberry32(seed: number): Rng {
   };
 }
 
-export function splitmix32(seed: number): Rng {
-  let a = seed >>> 0;
-  return function () {
-    a = (a + 0x9E3779B9) | 0;
-    let t = a;
-    t = Math.imul(t ^ (t >>> 16), 0x85EBCA6B);
-    t = Math.imul(t ^ (t >>> 13), 0xC2B2AE35);
-    return ((t ^ (t >>> 16)) >>> 0) / 4294967296;
-  };
-}
-
 export function pick<T>(rng: Rng, arr: T[]): T {
   return arr[(rng() * arr.length) | 0];
 }

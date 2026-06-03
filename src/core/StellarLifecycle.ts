@@ -21,17 +21,3 @@ export function mainSeqLifetime(massMsun: number): number {
 // Death channel: core-collapse supernova (→ stellar BH) above this mass,
 // otherwise planetary nebula + white-dwarf cooling.
 export const SUPERNOVA_MASS = 8;        // M☉
-
-// Phase of a star at cosmic time t, given its birth + lifetime.
-// Returned `frac` < 0 means unborn; 0..0.85 main sequence;
-// 0.85..1.0 subgiant→giant; >1.0 post-death (compute sinceDeath separately).
-export interface StarPhase {
-  frac: number;
-  dead: boolean;
-  age: number;     // Gyr since birth
-}
-export function starPhase(cosmicT: number, birth: number, lifetime: number): StarPhase {
-  const age  = cosmicT - birth;
-  const frac = age / lifetime;
-  return { frac, age, dead: frac >= 1.0 };
-}

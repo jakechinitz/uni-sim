@@ -104,17 +104,6 @@ export interface Defect {
   rS: number;   // Schwarzschild-like saturation radius (sim units)
 }
 
-// q at point x given defects. Clamped to [0,1]; q=0 ⇒ saturated (black-hole region).
-export function qField(px: number, py: number, pz: number, defects: Defect[]): number {
-  let drain = 0;
-  for (const d of defects) {
-    const rx = px - d.pos[0], ry = py - d.pos[1], rz = pz - d.pos[2];
-    const r = Math.sqrt(rx * rx + ry * ry + rz * rz) + 1e-6;
-    drain += d.rS / r;
-  }
-  return Math.max(0, Math.min(1, 1 - drain));
-}
-
 // -∇q · c²/2 — the substrate force on a test defect.
 // We compute analytically: ∂q/∂x_k = - Σ d.rS · (x_k - d.pos_k) / |r|^3  (only where unclamped).
 export function gradAccelQ(
