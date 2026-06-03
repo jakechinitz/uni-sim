@@ -65,6 +65,7 @@ if (!proto.__unisimGalaxyRuntimePatch) {
 
       if (swallowed) {
         star.state = 'dead';
+        star.deathT = Number.NEGATIVE_INFINITY;
         star.spawnedBH = true;
         star.body.fixed = true;
         positions[i * 3 + 0] = 1e6;
