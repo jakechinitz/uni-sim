@@ -126,16 +126,15 @@ export class App {
 
     bindUI({
       state: this.state,
-      onChange: () => {
-        this.state.quality = qualityForLevel(this.state.quality).level;
-        this.applyQuality();
-        this.clock.scrub      = this.state.scrub;
-        this.clock.speedExp   = this.state.speedExp;
-        this.clock.direction  = this.state.direction;
-        this.clock.playing    = this.state.playing;
-        this.clock.useLogPace = this.state.logPace ?? false;
-        this.regimes.setZoom(this.state.zoom);
-        autosave(this.state);
+      onChange: () => this.applyControlState(),
+      // The time slider / Big Bang button are the ONLY controls meant to move
+      // cosmic time. They go through onScrub so cosmetic toggles (entanglement,
+      // disk, many-pasts, …) never re-assert scrub — re-asserting it snaps time
+      // back from the future (scrub clamps to 1 past present), which jerked the
+      // galaxy into a catch-up replay (vanishing SMBH, mass star deaths).
+      onScrub: () => {
+        this.clock.scrub = this.state.scrub;
+        this.applyControlState();
       },
       onLoad: (data) => {
         data.quality = qualityForLevel(data.quality).level;
@@ -211,6 +210,20 @@ export class App {
 
   private currentQuality() {
     return qualityForLevel(this.state.quality);
+  }
+
+  // Push UI control-state into the clock + regimes WITHOUT touching cosmic
+  // time. `scrub` is deliberately excluded: it is lossy (clamps to 1 once
+  // time runs past present), so only the dedicated onScrub path may write it.
+  private applyControlState() {
+    this.state.quality = qualityForLevel(this.state.quality).level;
+    this.applyQuality();
+    this.clock.speedExp   = this.state.speedExp;
+    this.clock.direction  = this.state.direction;
+    this.clock.playing    = this.state.playing;
+    this.clock.useLogPace = this.state.logPace ?? false;
+    this.regimes.setZoom(this.state.zoom);
+    autosave(this.state);
   }
 
   private applyQuality() {

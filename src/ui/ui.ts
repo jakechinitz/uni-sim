@@ -8,6 +8,10 @@ import { scaleAuditRows } from '../core/ScaleAudit';
 export interface UICallbacks {
   state: SaveData;
   onChange: () => void;
+  // Like onChange, but also applies state.scrub to the cosmic clock. Used
+  // only by the time slider and Big Bang button — the controls that are
+  // actually meant to move time. Cosmetic toggles must use onChange.
+  onScrub: () => void;
   onLoad: (data: SaveData) => void;
   onNewSeed: () => void;
   // Optional anchor-related hooks. If supplied, the scene-picker dropdown
@@ -101,7 +105,7 @@ export function bindUI(cb: UICallbacks) {
     cb.state.scrub = parseFloat(sliderTime.value);
     // Manually scrubbing exits log-pace — user is taking direct control.
     cb.state.logPace = false;
-    cb.onChange();
+    cb.onScrub();
   });
   sliderZoom.addEventListener('input', () => {
     cb.state.zoom = parseFloat(sliderZoom.value);
@@ -232,7 +236,7 @@ export function bindUI(cb: UICallbacks) {
       sliderTime.value  = String(cb.state.scrub);
       sliderZoom.value  = String(cb.state.zoom);
       paintTransport();
-      cb.onChange();
+      cb.onScrub();
     });
   }
 }
