@@ -1,3 +1,4 @@
+import * as THREE from 'three';
 import { GalaxyRegime } from './GalaxyRegime';
 import { SUPERNOVA_MASS } from '../core/StellarLifecycle';
 
