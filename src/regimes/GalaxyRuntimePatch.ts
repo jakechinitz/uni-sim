@@ -15,6 +15,7 @@ const STAR_POINT_SIZE = 0.17;
 const MIN_STAR_OPACITY = 0.62;
 const SWALLOW_R_K = 0.055;
 const DEAD_FLASH_VISIBLE_GYR = 1e-11;
+const HIDDEN_STAR_POS = 1e6;
 
 const proto = GalaxyRegime.prototype as any;
 if (!proto.__unisimGalaxyRuntimePatch) {
@@ -68,9 +69,12 @@ if (!proto.__unisimGalaxyRuntimePatch) {
         star.deathT = Number.NEGATIVE_INFINITY;
         star.spawnedBH = true;
         star.body.fixed = true;
-        positions[i * 3 + 0] = 1e6;
-        positions[i * 3 + 1] = 1e6;
-        positions[i * 3 + 2] = 1e6;
+        star.body.pos[0] = HIDDEN_STAR_POS;
+        star.body.pos[1] = HIDDEN_STAR_POS;
+        star.body.pos[2] = HIDDEN_STAR_POS;
+        positions[i * 3 + 0] = HIDDEN_STAR_POS;
+        positions[i * 3 + 1] = HIDDEN_STAR_POS;
+        positions[i * 3 + 2] = HIDDEN_STAR_POS;
         colors[i * 3 + 0] = 0;
         colors[i * 3 + 1] = 0;
         colors[i * 3 + 2] = 0;
