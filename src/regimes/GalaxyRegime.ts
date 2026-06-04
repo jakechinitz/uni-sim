@@ -221,7 +221,6 @@ export class GalaxyRegime extends Regime {
       const cz = (rng() - 0.5) * 1.5;
       mesh.position.set(cx, 0, cz);
       mesh.userData = { type: 'bh', index: 0 };
-      this.addBHPickSphere(mesh);
       this.scene.add(mesh);
       this.draggable.add(mesh);
       // Central halo: large (proportional to SMBH mass), parented so it
@@ -269,7 +268,6 @@ export class GalaxyRegime extends Regime {
       });
       mesh.position.set(x, y, z);
       mesh.userData = { type: 'bh', index: this.bhs.length };
-      this.addBHPickSphere(mesh);
       this.scene.add(mesh);
       this.draggable.add(mesh);
       // Initial tangential velocity ≈ Keplerian circular speed around the
@@ -721,7 +719,6 @@ export class GalaxyRegime extends Regime {
     });
     mesh.position.set(s.body.pos[0], s.body.pos[1], s.body.pos[2]);
     mesh.userData = { type: 'bh', index: this.bhs.length };
-    this.addBHPickSphere(mesh);
     this.scene.add(mesh);
     this.draggable.add(mesh);
     const halo = makeBHHalo(radius * 5);
@@ -781,18 +778,6 @@ export class GalaxyRegime extends Regime {
   // `phi`, returned as [x, z] in the galaxy plane. Arc-speed is slowest near
   // the major-axis tips, so stars crowd there — that crowding is the arm.
   // Rotating `phi` rigidly rotates the whole spiral without winding it.
-  // Invisible, generously-sized pick target attached to a BH. The BH mesh is
-  // scaled to ~0.25x for display and this sphere inherits that scale, giving a
-  // ~1.5 world-unit grab radius — so the small BH stays reliably clickable even
-  // when buried in a dense star field (e.g. self-gravity mode).
-  private addBHPickSphere(mesh: THREE.Object3D) {
-    const s = new THREE.Mesh(
-      new THREE.SphereGeometry(6, 8, 8),
-      new THREE.MeshBasicMaterial({ transparent: true, opacity: 0, depthWrite: false })
-    );
-    mesh.add(s);
-  }
-
   private dwPos(gr: number, ecc: number, ang: number, phi: number): [number, number] {
     const ex = gr * Math.cos(ang);
     const ey = gr * (1 - ecc) * Math.sin(ang);
