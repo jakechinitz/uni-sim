@@ -12,7 +12,7 @@
   <canvas id="c"></canvas>
 
   <div id="hud-epoch">—</div>
-  <div id="hud-disclaimer" data-tip="The physics labels use literal Schwarzschild, Hawking, RAR, and closure formulas; the rendered black-hole disks are intentionally inflated because true radii would be far below one pixel at galaxy scale.">black holes are visibility-scaled · labels are physical</div>
+  <div id="hud-disclaimer" data-tip="A real black hole's Schwarzschild radius is far below one pixel at galaxy scale, so the disks here are inflated purely so you can see them. Every physics label (r_s, T_H, S_BH) uses the literal Schwarzschild / Hawking / RAR / closure formulas — only the on-screen size is scaled up.">Black hole size: shown ≈10⁸× actual diameter (for visibility) · all labels are real</div>
   <div id="scale-audit" data-tip="Current visual black-hole radii compared with true Schwarzschild radii assuming 1 simulation unit is roughly 1 kpc in galaxy view.">
     <div class="scale-audit-title">BH scale audit</div>
     <div id="scale-audit-rows"></div>
@@ -85,6 +85,7 @@
         <label class="pill" data-tip="Show the spiral disk overlay in galaxy view. Turn off to see just the stars + BHs."><input id="toggle-disk" type="checkbox" checked /><span>disk</span></label>
         <label class="pill" data-tip="Add dust lanes + pink HII star-forming regions + clumpy arm texture. Decorative — not part of the paper, but matches what real spirals look like in images."><input id="toggle-disk-detail" type="checkbox" checked /><span>disk-detail</span></label>
         <label class="pill" data-tip="Many-Pasts (paper §21). When rewinding, faint ghost trajectories show alternate histories consistent with the present."><input id="toggle-manypasts" type="checkbox" /><span>many-pasts</span></label>
+        <label class="pill" data-tip="Self-gravity (experimental). Replaces the painted density-wave spiral with REAL physics: the disk's stars feel each other's gravity through the paper's RAR, so a bar + spiral structure emerges and evolves on its own — the actual MOND dynamics rather than a painting. Heavier to compute, and necessarily more diffuse than the painted disk: that's what a genuine self-gravitating disk looks like at this star count."><input id="toggle-selfgrav" type="checkbox" /><span>self-gravity</span></label>
       </div>
 
       <div class="cluster">

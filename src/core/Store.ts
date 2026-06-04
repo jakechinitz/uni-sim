@@ -29,6 +29,7 @@ export interface SaveData {
     disk: boolean;
     diskDetail?: boolean;   // dust lanes + HII regions + clumps; default ON
     manyPasts: boolean;
+    selfGravity?: boolean;  // experimental: real self-gravity galaxy disk; default OFF
     bloom?: boolean;
   };
 }

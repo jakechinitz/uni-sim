@@ -48,6 +48,7 @@ const SG_RD = 5.0;            // exponential disk scale length
 const SG_EPS_CELLS = 0.3;     // softening, in grid cells
 const SG_DT_MAX = 0.12;       // max integration step (Verlet stability)
 const SG_BH_SOFT2 = 9.0;      // central-mass softening² (spreads the core, no spike)
+const SG_Q = 0.9;             // baked Toomre-Q (best from tuning: strong bar, low drift)
 const R_GAL   = 18;
 const G_SIM   = 0.0008;
 const A0_SIM  = 0.00010;
@@ -150,7 +151,6 @@ export class GalaxyRegime extends Regime {
   private centerInit = false;
   // Experimental self-gravity (PM N-body) state.
   private sgActive = false;
-  private sgQ = -999;
   private sgKx: Float64Array | null = null;
   private sgKz: Float64Array | null = null;
   private sgDens = new Float32Array(SG_GN * SG_GN);
@@ -871,7 +871,8 @@ export class GalaxyRegime extends Regime {
   }
 
   // (Re)seed a warm, Q-stable exponential disk around the SMBH and prime accel.
-  private sgInit(Q: number, cx: number, cy: number, cz: number) {
+  private sgInit(cx: number, cy: number, cz: number) {
+    const Q = SG_Q;
     if (!this.sgKx) this.sgBuildKernel();
     for (const s of this.stars) {
       let r: number; do { r = -SG_RD * Math.log(Math.random() + 1e-12); } while (r > R_GAL || r < 0.4);
@@ -1096,9 +1097,8 @@ export class GalaxyRegime extends Regime {
     const dcx = cx - this.prevCx, dcy = cy - this.prevCy, dcz = cz - this.prevCz;
     this.prevCx = cx; this.prevCy = cy; this.prevCz = cz;
     if (ctx.selfGravityOn) {
-      // Experimental: real PM self-gravity + RAR. (Re)seed on enable or Q change.
-      const sgQ = ctx.selfGravityQ ?? 0.9;
-      if (!this.sgActive || Math.abs(sgQ - this.sgQ) > 1e-4) { this.sgInit(sgQ, cx, cy, cz); this.sgActive = true; this.sgQ = sgQ; }
+      // Experimental: real PM self-gravity + RAR. (Re)seed on enable.
+      if (!this.sgActive) { this.sgInit(cx, cy, cz); this.sgActive = true; }
       this.sgUpdate(visDt, cx, cy, cz);
     } else {
     if (this.sgActive) this.sgActive = false;

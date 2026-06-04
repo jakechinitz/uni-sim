@@ -65,6 +65,7 @@ export function bindUI(cb: UICallbacks) {
   const togDisk     = el<HTMLInputElement>('toggle-disk');
   const togDiskD    = el<HTMLInputElement>('toggle-disk-detail');
   const togMP       = el<HTMLInputElement>('toggle-manypasts');
+  const togSG       = el<HTMLInputElement>('toggle-selfgrav');
   const qualitySel  = document.getElementById('quality-select') as HTMLSelectElement | null;
 
   renderScaleAuditPanel();
@@ -99,6 +100,8 @@ export function bindUI(cb: UICallbacks) {
   togDiskD.checked  = cb.state.toggles.diskDetail;
   cb.state.toggles.manyPasts = cb.state.toggles.manyPasts ?? false;
   togMP.checked     = cb.state.toggles.manyPasts;
+  cb.state.toggles.selfGravity = cb.state.toggles.selfGravity ?? false;
+  togSG.checked     = cb.state.toggles.selfGravity;
   paintTransport();
 
   sliderTime.addEventListener('input', () => {
@@ -185,6 +188,10 @@ export function bindUI(cb: UICallbacks) {
   });
   togMP.addEventListener('change', () => {
     cb.state.toggles.manyPasts = togMP.checked;
+    cb.onChange();
+  });
+  togSG.addEventListener('change', () => {
+    cb.state.toggles.selfGravity = togSG.checked;
     cb.onChange();
   });
 
@@ -274,6 +281,7 @@ export function syncControls(state: SaveData) {
   (el<HTMLInputElement>('toggle-disk')).checked     = state.toggles.disk ?? true;
   (el<HTMLInputElement>('toggle-disk-detail')).checked = state.toggles.diskDetail ?? true;
   (el<HTMLInputElement>('toggle-manypasts')).checked   = state.toggles.manyPasts ?? false;
+  (el<HTMLInputElement>('toggle-selfgrav')).checked     = state.toggles.selfGravity ?? false;
   const qualitySel = document.getElementById('quality-select') as HTMLSelectElement | null;
   if (qualitySel) qualitySel.value = state.quality;
   (el<HTMLButtonElement>('btn-play')).textContent = state.playing ? '⏸' : '▶';
