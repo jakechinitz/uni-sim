@@ -36,6 +36,9 @@ export class App {
   private clock = new Clock();
   private state: SaveData;
   private prevTime = 1; // ensure first frame with time≈0 fires the bang flash
+  private sgOn = false;        // experimental galaxy self-gravity toggle (debug panel)
+  private sgQ = 0.9;           // Toomre-Q slider value
+  private sgReadout?: HTMLElement;
   private controls!: OrbitControls;
   private drag!: DragController;
   private canvas!: HTMLCanvasElement;
@@ -114,6 +117,7 @@ export class App {
         this.regimes.unpinAll();
       }
     });
+    this.buildSelfGravityPanel();
 
     // Install OrbitControls on the initial regime and re-install on every
     // regime swap so the controls track whichever camera is active.
@@ -224,6 +228,47 @@ export class App {
     this.clock.useLogPace = this.state.logPace ?? false;
     this.regimes.setZoom(this.state.zoom);
     autosave(this.state);
+  }
+
+  // Temporary debug panel for the experimental self-gravity mode: a toggle, a
+  // Toomre-Q slider, and a live health readout (so the disk is tuned by numbers,
+  // not by eye). Remove once the parameters are dialled in.
+  private buildSelfGravityPanel() {
+    const wrap = document.createElement('div');
+    wrap.style.cssText = 'position:fixed;right:10px;bottom:10px;z-index:50;background:rgba(10,14,24,.82);' +
+      'border:1px solid #2a3a55;border-radius:8px;padding:10px 12px;font:11px/1.5 ui-monospace,monospace;color:#cfe;min-width:210px';
+    const head = document.createElement('label');
+    head.style.cssText = 'display:flex;align-items:center;gap:6px;cursor:pointer;font-weight:600';
+    const cb = document.createElement('input'); cb.type = 'checkbox';
+    head.appendChild(cb); head.appendChild(document.createTextNode('self-gravity (experimental)'));
+    const qrow = document.createElement('div'); qrow.style.cssText = 'margin-top:8px;display:flex;align-items:center;gap:6px';
+    const ql = document.createElement('span'); ql.textContent = 'Q';
+    const slider = document.createElement('input'); slider.type = 'range';
+    slider.min = '0.4'; slider.max = '2.5'; slider.step = '0.05'; slider.value = String(this.sgQ); slider.style.flex = '1';
+    const qv = document.createElement('span'); qv.textContent = this.sgQ.toFixed(2); qv.style.minWidth = '30px';
+    qrow.appendChild(ql); qrow.appendChild(slider); qrow.appendChild(qv);
+    const readout = document.createElement('div'); readout.style.cssText = 'margin-top:8px;white-space:pre';
+    readout.textContent = 'off — colder Q = stronger bar';
+    this.sgReadout = readout;
+    cb.addEventListener('change', () => { this.sgOn = cb.checked; });
+    slider.addEventListener('input', () => { this.sgQ = parseFloat(slider.value); qv.textContent = this.sgQ.toFixed(2); });
+    wrap.appendChild(head); wrap.appendChild(qrow); wrap.appendChild(readout);
+    document.body.appendChild(wrap);
+  }
+
+  private updateSelfGravityReadout() {
+    if (!this.sgReadout) return;
+    if (!this.sgOn) { this.sgReadout.textContent = 'off — colder Q = stronger bar'; this.sgReadout.style.color = '#789'; return; }
+    const stats = (this.regimes.current as any).selfGravityStats?.();
+    if (!stats) { this.sgReadout.textContent = 'zoom into a galaxy →'; this.sgReadout.style.color = '#cc9'; return; }
+    const ok = stats.verdict.startsWith('✓');
+    const bad = stats.verdict.startsWith('⚠');
+    this.sgReadout.style.color = ok ? '#7ec88a' : bad ? '#e08a7a' : '#cfe';
+    this.sgReadout.textContent =
+      `A2(bar)   ${stats.a2.toFixed(3)}\n` +
+      `R drift   ${(stats.drift * 100).toFixed(0)}%\n` +
+      `retained  ${(stats.retained * 100).toFixed(0)}%\n` +
+      `${stats.verdict}`;
   }
 
   private applyQuality() {
@@ -428,6 +473,8 @@ export class App {
         diskOn: this.state.toggles.disk ?? true,
         diskDetailOn: this.state.toggles.diskDetail ?? true,
         manyPastsOn: (this.state.toggles.manyPasts ?? false) && this.clock.direction === -1 && this.clock.playing,
+        selfGravityOn: this.sgOn,
+        selfGravityQ: this.sgQ,
         dtWall,
         rate: this.clock.speed,
         quality,
@@ -443,6 +490,8 @@ export class App {
       this.composer.setLensSources(this.regimes.current.camera, lensSources);
       this.regimes.render(dtWall);
     }
+
+    this.updateSelfGravityReadout();
 
     // HUD
     const zR = cosmoZ(tGyr);

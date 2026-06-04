@@ -37,6 +37,16 @@ const ARM_ECC_MAX = 0.42;
 // Damping ratio for the transient disk slosh when the SMBH is dragged. ~0.25 is
 // underdamped — a couple of visible oscillations, then it settles.
 const SLOSH_DAMP = 0.25;
+// ---- Experimental self-gravity (default OFF, toggle in the SG debug panel) ----
+// Verified in /tmp prototypes: a warm Q-stable exponential disk under
+// particle-mesh gravity + the paper's RAR forms a stable, confined MOND bar
+// (A2 → ~0.3 with ~98% of stars retained). Knobs trade structure↔stability.
+const SG_GN = 48;             // PM grid resolution (NxN)
+const SG_DISK_MASS = 1500;    // disk self-gravity mass (sim units)
+const SG_BH_MASS = 80;        // light central mass (bar-favoring; SG-only)
+const SG_RD = 5.0;            // exponential disk scale length
+const SG_EPS_CELLS = 0.3;     // softening, in grid cells
+const SG_DT_MAX = 0.08;       // max integration step (Verlet stability)
 const R_GAL   = 18;
 const G_SIM   = 0.0008;
 const A0_SIM  = 0.00010;
@@ -137,6 +147,21 @@ export class GalaxyRegime extends Regime {
   // Previous SMBH position — its per-frame motion drives the transient slosh.
   private prevCx = 0; private prevCy = 0; private prevCz = 0;
   private centerInit = false;
+  // Experimental self-gravity (PM N-body) state.
+  private sgActive = false;
+  private sgQ = -999;
+  private sgKx: Float64Array | null = null;
+  private sgKz: Float64Array | null = null;
+  private sgDens = new Float32Array(SG_GN * SG_GN);
+  private sgFx = new Float32Array(SG_GN * SG_GN);
+  private sgFz = new Float32Array(SG_GN * SG_GN);
+  private sgAx = new Float64Array(N_STARS);
+  private sgAz = new Float64Array(N_STARS);
+  private sgOccI = new Int32Array(SG_GN * SG_GN);
+  private sgOccJ = new Int32Array(SG_GN * SG_GN);
+  private sgOccM = new Float64Array(SG_GN * SG_GN);
+  private sgInitRrms = 1;
+  private sgStats = { a2: 0, drift: 0, retained: 1, verdict: 'off' };
   private telegrapher = new TelegrapherField(2.0, new THREE.Color(0x9ee0ff));
   private manyPasts = new ManyPasts(new THREE.Color(0x9b8dff), 2.5);
   // Supernova flare pool — when a massive star dies it spawns one of
@@ -758,6 +783,173 @@ export class GalaxyRegime extends Regime {
     return [ex * cphi - ey * sphi, ex * sphi + ey * cphi];
   }
 
+  // ======================= Experimental self-gravity =======================
+  // Particle-mesh (CIC) in-plane gravity on a grid centred on the SMBH, plus a
+  // light central point mass, all RAR-boosted, integrated with velocity-Verlet.
+  // Ported from the verified /tmp prototype. Read selfGravityStats() for health.
+  selfGravityStats() { return this.sgStats; }
+
+  private sgGauss(): number {
+    return Math.sqrt(-2 * Math.log(Math.random() + 1e-12)) * Math.cos(6.2831853 * Math.random());
+  }
+  private sgSpan() { return R_GAL * 1.6; }
+  private sgCell() { return 2 * this.sgSpan() / SG_GN; }
+
+  private sgBuildKernel() {
+    const N = SG_GN, KW = 2 * N + 1, cell = this.sgCell(), eps = SG_EPS_CELLS * cell;
+    const Kx = new Float64Array(KW * KW), Kz = new Float64Array(KW * KW);
+    for (let dj = -N; dj <= N; dj++) for (let di = -N; di <= N; di++) {
+      const X = di * cell, Z = dj * cell, r2 = X * X + Z * Z + eps * eps;
+      const inv = 1 / Math.sqrt(r2), inv3 = inv * inv * inv;
+      Kx[(dj + N) * KW + (di + N)] = -G_SIM * X * inv3;   // attractive
+      Kz[(dj + N) * KW + (di + N)] = -G_SIM * Z * inv3;
+    }
+    this.sgKx = Kx; this.sgKz = Kz;
+  }
+
+  // Deposit star mass (CIC) and convolve with the kernel → in-plane force field.
+  private sgField(cx: number, cz: number) {
+    const N = SG_GN, span = this.sgSpan(), inv = 1 / this.sgCell();
+    const ox = cx - span, oz = cz - span, dens = this.sgDens, m = SG_DISK_MASS / N_STARS;
+    dens.fill(0);
+    for (const s of this.stars) {
+      if (s.state === 'absorbed') continue;
+      const fx = (s.body.pos[0] - ox) * inv, fz = (s.body.pos[2] - oz) * inv;
+      const i0 = Math.floor(fx), j0 = Math.floor(fz), tx = fx - i0, tz = fz - j0;
+      if (i0 >= 0 && i0 < N && j0 >= 0 && j0 < N) dens[j0 * N + i0] += m * (1 - tx) * (1 - tz);
+      if (i0 + 1 < N && j0 >= 0 && j0 < N) dens[j0 * N + i0 + 1] += m * tx * (1 - tz);
+      if (i0 >= 0 && i0 < N && j0 + 1 < N) dens[(j0 + 1) * N + i0] += m * (1 - tx) * tz;
+      if (i0 + 1 < N && j0 + 1 < N) dens[(j0 + 1) * N + i0 + 1] += m * tx * tz;
+    }
+    // Collect occupied source cells, then convolve over only those (the disk
+    // fills a fraction of the grid → big speedup vs. all cell-pairs).
+    const occI = this.sgOccI, occJ = this.sgOccJ, occM = this.sgOccM;
+    let nOcc = 0;
+    for (let k = 0; k < N * N; k++) { const d = dens[k]; if (d !== 0) { occI[nOcc] = k % N; occJ[nOcc] = (k / N) | 0; occM[nOcc] = d; nOcc++; } }
+    const Kx = this.sgKx!, Kz = this.sgKz!, KW = 2 * N + 1, Fx = this.sgFx, Fz = this.sgFz;
+    for (let cj = 0; cj < N; cj++) {
+      const crow = cj * N;
+      for (let ci = 0; ci < N; ci++) {
+        let sx = 0, sz = 0;
+        for (let o = 0; o < nOcc; o++) {
+          const ki = (cj - occJ[o] + N) * KW + (ci - occI[o] + N), mm = occM[o];
+          sx += mm * Kx[ki]; sz += mm * Kz[ki];
+        }
+        Fx[crow + ci] = sx; Fz[crow + ci] = sz;
+      }
+    }
+  }
+
+  // Bilinear (CIC) sample of the force field at world (x,z).
+  private sgSample(x: number, z: number, cx: number, cz: number): [number, number] {
+    const N = SG_GN, span = this.sgSpan(), inv = 1 / this.sgCell();
+    const ox = cx - span, oz = cz - span, fx = (x - ox) * inv, fz = (z - oz) * inv;
+    const i0 = Math.floor(fx), j0 = Math.floor(fz), tx = fx - i0, tz = fz - j0;
+    const Fx = this.sgFx, Fz = this.sgFz;
+    const cl = (a: number) => (a < 0 ? 0 : a >= N ? N - 1 : a);
+    const k00 = cl(j0) * N + cl(i0), k10 = cl(j0) * N + cl(i0 + 1), k01 = cl(j0 + 1) * N + cl(i0), k11 = cl(j0 + 1) * N + cl(i0 + 1);
+    const gx = (Fx[k00] * (1 - tx) + Fx[k10] * tx) * (1 - tz) + (Fx[k01] * (1 - tx) + Fx[k11] * tx) * tz;
+    const gz = (Fz[k00] * (1 - tx) + Fz[k10] * tx) * (1 - tz) + (Fz[k01] * (1 - tx) + Fz[k11] * tx) * tz;
+    return [gx, gz];
+  }
+
+  // RAR-boosted acceleration (disk field + light central point), stored per star.
+  private sgComputeAccel(cx: number, cz: number) {
+    this.sgField(cx, cz);
+    const stars = this.stars;
+    for (let i = 0; i < stars.length; i++) {
+      const s = stars[i];
+      if (s.state === 'absorbed') { this.sgAx[i] = 0; this.sgAz[i] = 0; continue; }
+      const X = s.body.pos[0] - cx, Z = s.body.pos[2] - cz;
+      let [gx, gz] = this.sgSample(s.body.pos[0], s.body.pos[2], cx, cz);
+      const r2 = X * X + Z * Z + 1, inv = 1 / Math.sqrt(r2), inv3 = inv * inv * inv, fb = G_SIM * SG_BH_MASS * inv3;
+      gx += -fb * X; gz += -fb * Z;
+      const gN = Math.hypot(gx, gz) + 1e-30, b = nuRAR(gN / A0_SIM);
+      this.sgAx[i] = b * gx; this.sgAz[i] = b * gz;
+    }
+  }
+
+  // (Re)seed a warm, Q-stable exponential disk around the SMBH and prime accel.
+  private sgInit(Q: number, cx: number, cy: number, cz: number) {
+    if (!this.sgKx) this.sgBuildKernel();
+    for (const s of this.stars) {
+      let r: number; do { r = -SG_RD * Math.log(Math.random() + 1e-12); } while (r > R_GAL || r < 0.4);
+      const th = Math.random() * Math.PI * 2;
+      s.body.pos[0] = cx + r * Math.cos(th);
+      s.body.pos[2] = cz + r * Math.sin(th);
+      s.yOff = (Math.random() - 0.5) * 0.4 * Math.exp(-r / 8);
+      s.body.pos[1] = cy + s.yOff;
+      if (s.state === 'absorbed') s.state = 'main';
+    }
+    this.sgField(cx, cz);
+    // azimuthally-averaged actual circular speed from the field
+    const NB = 48, vcb = new Float64Array(NB), cnt = new Float64Array(NB);
+    for (const s of this.stars) {
+      const X = s.body.pos[0] - cx, Z = s.body.pos[2] - cz, r = Math.hypot(X, Z);
+      let [gx, gz] = this.sgSample(s.body.pos[0], s.body.pos[2], cx, cz);
+      const r2 = X * X + Z * Z + 1, inv = 1 / Math.sqrt(r2), inv3 = inv * inv * inv, fb = G_SIM * SG_BH_MASS * inv3;
+      gx += -fb * X; gz += -fb * Z;
+      const gN = Math.hypot(gx, gz) + 1e-30, b = nuRAR(gN / A0_SIM);
+      const gr = -(b * gx * X + b * gz * Z) / Math.max(r, 1e-3);
+      const bn = Math.min(NB - 1, (r / R_GAL * NB) | 0); if (gr > 0) { vcb[bn] += Math.sqrt(gr * r); cnt[bn]++; }
+    }
+    for (let bn = 0; bn < NB; bn++) vcb[bn] = cnt[bn] > 0 ? vcb[bn] / cnt[bn] : (bn > 0 ? vcb[bn - 1] : 0);
+    for (let p = 0; p < 2; p++) { const t = vcb.slice(); for (let bn = 1; bn < NB - 1; bn++) vcb[bn] = (t[bn - 1] + t[bn] + t[bn + 1]) / 3; }
+    const S0 = SG_DISK_MASS / (2 * Math.PI * SG_RD * SG_RD);
+    for (const s of this.stars) {
+      const X = s.body.pos[0] - cx, Z = s.body.pos[2] - cz, r = Math.hypot(X, Z), th = Math.atan2(Z, X);
+      const v = vcb[Math.min(NB - 1, (r / R_GAL * NB) | 0)], O = v / Math.max(r, 1e-3), k = Math.SQRT2 * O;
+      const Sig = S0 * Math.exp(-r / SG_RD);
+      const gbar = G_SIM * (SG_BH_MASS + SG_DISK_MASS * (1 - (1 + r / SG_RD) * Math.exp(-r / SG_RD))) / Math.max(r * r, 1e-3);
+      let sR = Q * 3.36 * G_SIM * nuRAR(gbar / A0_SIM) * Sig / Math.max(k, 1e-3); sR = Math.min(sR, 0.45 * v + 1e-6);
+      const sPhi = sR * k / (2 * Math.max(O, 1e-3));
+      const vm = Math.sqrt(Math.max(0, v * v - sR * sR * (2 * r / SG_RD - 0.5)));
+      const g1 = this.sgGauss(), g2 = this.sgGauss(), tx = -Math.sin(th), tz = Math.cos(th);
+      s.body.vel[0] = tx * vm + g1 * sR * Math.cos(th) - Math.sin(th) * g2 * sPhi;
+      s.body.vel[2] = tz * vm + g1 * sR * Math.sin(th) + Math.cos(th) * g2 * sPhi;
+      s.body.vel[1] = 0;
+    }
+    this.sgAx.fill(0); this.sgAz.fill(0);
+    this.sgComputeAccel(cx, cz);
+    let re = 0, n = 0; for (const s of this.stars) { const X = s.body.pos[0] - cx, Z = s.body.pos[2] - cz; re += X * X + Z * Z; n++; }
+    this.sgInitRrms = Math.sqrt(re / Math.max(n, 1));
+  }
+
+  // One leapfrog (KDK) step + health metrics. Disk held thin (y = SMBH plane).
+  private sgUpdate(visDt: number, cx: number, cy: number, cz: number) {
+    const dt = Math.min(Math.abs(visDt), SG_DT_MAX), stars = this.stars;
+    if (dt > 1e-6) {
+      for (let i = 0; i < stars.length; i++) {
+        const s = stars[i]; if (s.state === 'absorbed') continue;
+        s.body.vel[0] += 0.5 * dt * this.sgAx[i]; s.body.vel[2] += 0.5 * dt * this.sgAz[i];
+        s.body.pos[0] += dt * s.body.vel[0]; s.body.pos[2] += dt * s.body.vel[2];
+        s.body.pos[1] = cy + s.yOff;
+      }
+      this.sgComputeAccel(cx, cz);
+      for (let i = 0; i < stars.length; i++) {
+        const s = stars[i]; if (s.state === 'absorbed') continue;
+        s.body.vel[0] += 0.5 * dt * this.sgAx[i]; s.body.vel[2] += 0.5 * dt * this.sgAz[i];
+      }
+    }
+    // health metrics
+    let c2 = 0, s2 = 0, re = 0, n = 0, within = 0;
+    for (const s of stars) {
+      if (s.state === 'absorbed') continue;
+      const X = s.body.pos[0] - cx, Z = s.body.pos[2] - cz, r = Math.hypot(X, Z), a = Math.atan2(Z, X);
+      c2 += Math.cos(2 * a); s2 += Math.sin(2 * a); re += X * X + Z * Z; n++; if (r < R_GAL) within++;
+    }
+    const A2 = n > 0 ? Math.hypot(c2, s2) / n : 0;
+    const rrms = Math.sqrt(re / Math.max(n, 1));
+    const drift = rrms / Math.max(this.sgInitRrms, 1e-3) - 1;
+    const retained = n > 0 ? within / n : 1;
+    let verdict: string;
+    if (retained < 0.8 || drift > 0.6) verdict = '⚠ dispersing — raise Q';
+    else if (A2 > 0.12) verdict = '✓ bar/spiral';
+    else if (A2 < 0.05) verdict = 'featureless — lower Q';
+    else verdict = 'forming…';
+    this.sgStats = { a2: A2, drift, retained, verdict };
+  }
+
   update(ctx: RegimeContext, dt: number): void {
     // Detect first-tick or cache-restore catch-up: if cosmic time jumped
     // more than ~1 Myr since the last update we saw, suppress visuals
@@ -897,6 +1089,13 @@ export class GalaxyRegime extends Regime {
     if (!this.centerInit) { this.prevCx = cx; this.prevCy = cy; this.prevCz = cz; this.centerInit = true; }
     const dcx = cx - this.prevCx, dcy = cy - this.prevCy, dcz = cz - this.prevCz;
     this.prevCx = cx; this.prevCy = cy; this.prevCz = cz;
+    if (ctx.selfGravityOn) {
+      // Experimental: real PM self-gravity + RAR. (Re)seed on enable or Q change.
+      const sgQ = ctx.selfGravityQ ?? 0.9;
+      if (!this.sgActive || Math.abs(sgQ - this.sgQ) > 1e-4) { this.sgInit(sgQ, cx, cy, cz); this.sgActive = true; this.sgQ = sgQ; }
+      this.sgUpdate(visDt, cx, cy, cz);
+    } else {
+    if (this.sgActive) this.sgActive = false;
     // Stable step for the slosh oscillator (semi-implicit Euler is stable for
     // ω·dt < 2; clamp so a high time-speed frame can't blow it up).
     const pdt = Math.min(Math.abs(visDt), 0.4);
@@ -937,9 +1136,12 @@ export class GalaxyRegime extends Regime {
         }
       }
     }
+    } // end !selfGravityOn (density-wave path)
     // Keep the spiral-shader disk centred on the SMBH too, so the whole galaxy
-    // moves coherently when the central BH is dragged.
+    // moves coherently when the central BH is dragged. Hide it in self-gravity
+    // mode so the prescribed arms don't fight the emergent ones.
     this.spiralMesh.position.set(cx, cy, cz);
+    if (ctx.selfGravityOn) this.spiralMesh.visible = false;
     // Push positions + lifecycle-driven colors into the point cloud.
     // Per-star: compute age, redden+brighten as we approach the lifetime,
     // then either flash (supernova → spawn a new stellar BH) or fade
