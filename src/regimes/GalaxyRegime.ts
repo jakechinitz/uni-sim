@@ -46,7 +46,8 @@ const SG_DISK_MASS = 1500;    // disk self-gravity mass (sim units)
 const SG_BH_MASS = 80;        // light central mass (bar-favoring; SG-only)
 const SG_RD = 5.0;            // exponential disk scale length
 const SG_EPS_CELLS = 0.3;     // softening, in grid cells
-const SG_DT_MAX = 0.08;       // max integration step (Verlet stability)
+const SG_DT_MAX = 0.12;       // max integration step (Verlet stability)
+const SG_BH_SOFT2 = 9.0;      // central-mass softening² (spreads the core, no spike)
 const R_GAL   = 18;
 const G_SIM   = 0.0008;
 const A0_SIM  = 0.00010;
@@ -862,7 +863,7 @@ export class GalaxyRegime extends Regime {
       if (s.state === 'absorbed') { this.sgAx[i] = 0; this.sgAz[i] = 0; continue; }
       const X = s.body.pos[0] - cx, Z = s.body.pos[2] - cz;
       let [gx, gz] = this.sgSample(s.body.pos[0], s.body.pos[2], cx, cz);
-      const r2 = X * X + Z * Z + 1, inv = 1 / Math.sqrt(r2), inv3 = inv * inv * inv, fb = G_SIM * SG_BH_MASS * inv3;
+      const r2 = X * X + Z * Z + SG_BH_SOFT2, inv = 1 / Math.sqrt(r2), inv3 = inv * inv * inv, fb = G_SIM * SG_BH_MASS * inv3;
       gx += -fb * X; gz += -fb * Z;
       const gN = Math.hypot(gx, gz) + 1e-30, b = nuRAR(gN / A0_SIM);
       this.sgAx[i] = b * gx; this.sgAz[i] = b * gz;
@@ -887,7 +888,7 @@ export class GalaxyRegime extends Regime {
     for (const s of this.stars) {
       const X = s.body.pos[0] - cx, Z = s.body.pos[2] - cz, r = Math.hypot(X, Z);
       let [gx, gz] = this.sgSample(s.body.pos[0], s.body.pos[2], cx, cz);
-      const r2 = X * X + Z * Z + 1, inv = 1 / Math.sqrt(r2), inv3 = inv * inv * inv, fb = G_SIM * SG_BH_MASS * inv3;
+      const r2 = X * X + Z * Z + SG_BH_SOFT2, inv = 1 / Math.sqrt(r2), inv3 = inv * inv * inv, fb = G_SIM * SG_BH_MASS * inv3;
       gx += -fb * X; gz += -fb * Z;
       const gN = Math.hypot(gx, gz) + 1e-30, b = nuRAR(gN / A0_SIM);
       const gr = -(b * gx * X + b * gz * Z) / Math.max(r, 1e-3);
@@ -986,6 +987,11 @@ export class GalaxyRegime extends Regime {
     // Floor at 0.62 so the surrounding star field never dims to near-nothing
     // when galaxyAlpha is low (early assembly / freshly-mounted regime).
     this.starMaterial.opacity = Math.max(0.45 + 0.55 * galaxyAlpha, 0.62);
+    // In self-gravity mode the painted shader disk is hidden, so the bare point
+    // cloud carries the whole image — make the points bigger + fully opaque so
+    // the emergent structure reads instead of looking sparse.
+    this.starMaterial.size = ctx.selfGravityOn ? 0.26 : 0.13;
+    if (ctx.selfGravityOn) this.starMaterial.opacity = 1.0;
     // Central SMBH grows with time (visualised as a slow accretion-disk
     // scale-up). Multiplier 0.85 → 1.15 over 0..13.8 Gyr.
     const smbhGrowth = 0.85 + 0.3 * Math.min(1, tG / 13.8);
