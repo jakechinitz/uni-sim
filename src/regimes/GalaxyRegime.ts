@@ -37,15 +37,6 @@ const ARM_ECC_MAX = 0.42;
 // Damping ratio for the transient disk slosh when the SMBH is dragged. ~0.25 is
 // underdamped — a couple of visible oscillations, then it settles.
 const SLOSH_DAMP = 0.25;
-// Experimental self-gravity (toggle with 'g'). The disk's own mass is binned on
-// an SG_N² grid, blurred (= gravitational softening), and its density gradient
-// pulls stars toward local overdensities — so arms self-reinforce and the disk
-// responds to perturbations with its own gravity. SG_STRENGTH is deliberately
-// gentle and SG_MAX caps the pull, so combined with the damped-oscillator
-// backbone the perturbation is provably bounded (no fragmentation / runaway).
-const SG_N = 64;                 // self-gravity grid resolution
-const SG_STRENGTH = 0.01;        // coupling: density-gradient → acceleration
-const SG_MAX = 0.08;             // hard cap on the self-gravity acceleration
 const R_GAL   = 18;
 const G_SIM   = 0.0008;
 const A0_SIM  = 0.00010;
@@ -146,10 +137,6 @@ export class GalaxyRegime extends Regime {
   // Previous SMBH position — its per-frame motion drives the transient slosh.
   private prevCx = 0; private prevCy = 0; private prevCz = 0;
   private centerInit = false;
-  // Self-gravity density grid (+ blur scratch) and its world->cell mapping.
-  private sgGrid = new Float32Array(SG_N * SG_N);
-  private sgBlur = new Float32Array(SG_N * SG_N);
-  private sgOriginX = 0; private sgOriginZ = 0; private sgInv = 1;
   private telegrapher = new TelegrapherField(2.0, new THREE.Color(0x9ee0ff));
   private manyPasts = new ManyPasts(new THREE.Color(0x9b8dff), 2.5);
   // Supernova flare pool — when a massive star dies it spawns one of
@@ -771,56 +758,6 @@ export class GalaxyRegime extends Regime {
     return [ex * cphi - ey * sphi, ex * sphi + ey * cphi];
   }
 
-  // Build the self-gravity density field (centred on the SMBH): bin star mass on
-  // a grid (using last frame's positions), then blur it as the gravitational
-  // softening. The blurred grid's gradient is sampled per star in update().
-  private buildSelfGravity(cx: number, cz: number) {
-    const N = SG_N, half = R_GAL * 1.3, cell = (2 * half) / N, inv = 1 / cell;
-    const ox = cx - half, oz = cz - half;
-    this.sgOriginX = ox; this.sgOriginZ = oz; this.sgInv = inv;
-    const g = this.sgGrid; g.fill(0);
-    for (const s of this.stars) {
-      if (s.state === 'absorbed') continue;
-      const ix = ((s.body.pos[0] - ox) * inv) | 0;
-      const iz = ((s.body.pos[2] - oz) * inv) | 0;
-      if (ix < 0 || ix >= N || iz < 0 || iz >= N) continue;
-      g[iz * N + ix] += 1;
-    }
-    // Separable 3-tap box blur, twice (≈ Gaussian softening).
-    const tmp = this.sgBlur;
-    for (let pass = 0; pass < 2; pass++) {
-      for (let j = 0; j < N; j++) {
-        const r = j * N;
-        for (let i = 0; i < N; i++) {
-          const a = g[r + (i > 0 ? i - 1 : i)], b = g[r + i], c = g[r + (i < N - 1 ? i + 1 : i)];
-          tmp[r + i] = (a + b + c) / 3;
-        }
-      }
-      for (let j = 0; j < N; j++) {
-        for (let i = 0; i < N; i++) {
-          const a = tmp[(j > 0 ? j - 1 : j) * N + i], b = tmp[j * N + i], c = tmp[(j < N - 1 ? j + 1 : j) * N + i];
-          g[j * N + i] = (a + b + c) / 3;
-        }
-      }
-    }
-  }
-
-  // Self-gravity acceleration at world (x, z): + the blurred-density gradient
-  // (toward overdensities), clamped. Returns [ax, az]; zero outside the grid.
-  private selfGravityAt(x: number, z: number): [number, number] {
-    const N = SG_N;
-    const fi = (x - this.sgOriginX) * this.sgInv;
-    const fj = (z - this.sgOriginZ) * this.sgInv;
-    const ix = fi | 0, iz = fj | 0;
-    if (ix < 1 || ix >= N - 1 || iz < 1 || iz >= N - 1) return [0, 0];
-    const g = this.sgGrid;
-    const gx = (g[iz * N + ix + 1] - g[iz * N + ix - 1]) * 0.5;
-    const gz = (g[(iz + 1) * N + ix] - g[(iz - 1) * N + ix]) * 0.5;
-    const ax = Math.max(-SG_MAX, Math.min(SG_MAX, SG_STRENGTH * gx));
-    const az = Math.max(-SG_MAX, Math.min(SG_MAX, SG_STRENGTH * gz));
-    return [ax, az];
-  }
-
   update(ctx: RegimeContext, dt: number): void {
     // Detect first-tick or cache-restore catch-up: if cosmic time jumped
     // more than ~1 Myr since the last update we saw, suppress visuals
@@ -966,10 +903,6 @@ export class GalaxyRegime extends Regime {
     const rCo = 0.55 * R_GAL;                                   // co-rotation radius
     const patternOmega = (this.circularSpeed(rCo) / rCo) * PATTERN_FRAC;
     const patternRot = patternOmega * tOrb;
-    // Experimental: the disk feels its own gravity. Build the density field once
-    // per frame (cheap, O(N)); each star then samples the gradient below.
-    const selfGrav = ctx.selfGravityOn;
-    if (selfGrav) this.buildSelfGravity(cx, cz);
     for (const star of this.stars) {
       if (star.state === 'absorbed') continue;
       const phi = ARM_TWIST * star.gr + patternRot;   // arm (major-axis) angle
@@ -978,16 +911,12 @@ export class GalaxyRegime extends Regime {
       const ex = ox + cx, ey = star.yOff + cy, ez = oz + cz;   // equilibrium (anchored to SMBH)
       // SMBH moved → shift the perturbation by −Δ so the star doesn't teleport;
       // then relax it as a damped oscillator (frequency ∝ ω(r), so inner stars
-      // re-settle fast, outer stars lag → the disk warps and recovers). When
-      // self-gravity is on, the disk's own pull toward overdensities drives the
-      // same oscillator — so arms self-reinforce, bounded by the damping + cap.
+      // re-settle fast, outer stars lag → the disk warps and recovers).
       star.qx -= dcx; star.qy -= dcy; star.qz -= dcz;
       const w = star.omega, k = w * w, damp = 2 * SLOSH_DAMP * w;
-      let sgx = 0, sgz = 0;
-      if (selfGrav) [sgx, sgz] = this.selfGravityAt(ex + star.qx, ez + star.qz);
-      star.ux += (-k * star.qx - damp * star.ux + sgx) * pdt;
+      star.ux += (-k * star.qx - damp * star.ux) * pdt;
       star.uy += (-k * star.qy - damp * star.uy) * pdt;
-      star.uz += (-k * star.qz - damp * star.uz + sgz) * pdt;
+      star.uz += (-k * star.qz - damp * star.uz) * pdt;
       star.qx += star.ux * pdt;
       star.qy += star.uy * pdt;
       star.qz += star.uz * pdt;

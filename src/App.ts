@@ -36,7 +36,6 @@ export class App {
   private clock = new Clock();
   private state: SaveData;
   private prevTime = 1; // ensure first frame with time≈0 fires the bang flash
-  private selfGravity = false; // experimental galaxy self-gravity ('g' to toggle)
   private controls!: OrbitControls;
   private drag!: DragController;
   private canvas!: HTMLCanvasElement;
@@ -113,11 +112,6 @@ export class App {
       if (ev.key === 'Escape') {
         unpinHoverCard();
         this.regimes.unpinAll();
-      }
-      // 'g' toggles experimental galaxy self-gravity (default off).
-      if (ev.key === 'g' || ev.key === 'G') {
-        this.selfGravity = !this.selfGravity;
-        this.composer.flash(0.25);
       }
     });
 
@@ -434,7 +428,6 @@ export class App {
         diskOn: this.state.toggles.disk ?? true,
         diskDetailOn: this.state.toggles.diskDetail ?? true,
         manyPastsOn: (this.state.toggles.manyPasts ?? false) && this.clock.direction === -1 && this.clock.playing,
-        selfGravityOn: this.selfGravity,
         dtWall,
         rate: this.clock.speed,
         quality,
