@@ -96,6 +96,15 @@ export class DragController {
     this.raycaster.params.Points = { threshold: Math.max(0.04, camDist * 0.015) };
   }
 
+  // Prefer a solid mesh (black hole / planet / defect) over the ambient
+  // star-points cloud. In a dense field the threshold-based points hit is often
+  // marginally closer than a small BH mesh, which would otherwise steal clicks
+  // meant for the buried object (e.g. the SMBH inside a self-gravity disk).
+  private bestHit(hits: THREE.Intersection[]): THREE.Intersection {
+    for (const h of hits) { if (!(h.object as any).isPoints) return h; }
+    return hits[0];
+  }
+
   private onDown = (ev: PointerEvent) => {
     if (ev.button !== 0) return;
     this.setNdc(ev);
@@ -111,12 +120,13 @@ export class DragController {
       return;
     }
     this.bgClickStart = null;
-    const target = this.regimePick(hits[0]);
+    const chosen = this.bestHit(hits);
+    const target = this.regimePick(chosen);
     if (!target) return;
     // ARM a pending pickup. Don't grab yet.
     this.pending = {
       target,
-      hoverInfo: this.regimeHover(hits[0]),
+      hoverInfo: this.regimeHover(chosen),
       downX: ev.clientX, downY: ev.clientY,
       downT: performance.now(),
       pointerId: ev.pointerId
@@ -183,7 +193,7 @@ export class DragController {
     this.setPointsThreshold(cam);
     this.raycaster.setFromCamera(this.pointerNdc, cam);
     const hits = this.raycaster.intersectObjects(this.getDraggables().children, true);
-    const hit = hits[0];
+    const hit = this.bestHit(hits);
     const overDraggable = !!hit && !!this.regimePick(hit);
     this.cursor.classList.toggle('active', overDraggable);
     this.canvas.classList.toggle('grab', overDraggable);
