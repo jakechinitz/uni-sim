@@ -101,7 +101,9 @@ export class App {
     // next zoom-in commits on the thing you clicked, not whatever the
     // camera ray happens to point at. Background click clears both.
     this.drag.onClickTarget = (info, target, x, y) => {
-      pinHoverCard(info, x, y);
+      // Black holes can't be drilled into, so pinning their hover card just
+      // leaves them stuck "selected". Show on hover only (no pin) — like normal.
+      if (!target.id.startsWith('bh-')) pinHoverCard(info, x, y);
       this.applyClickFocus(target.id);
     };
     this.drag.onClickBackground = () => {
