@@ -3,7 +3,6 @@
 import type { SaveData } from '../core/Store';
 import { downloadSave, readFile } from '../core/Store';
 import { qualityForLevel } from '../core/Quality';
-import { scaleAuditRows } from '../core/ScaleAudit';
 
 export interface UICallbacks {
   state: SaveData;
@@ -28,28 +27,6 @@ function el<T extends HTMLElement>(id: string): T {
   return document.getElementById(id) as T;
 }
 
-function renderScaleAuditPanel() {
-  const root = document.getElementById('scale-audit-rows');
-  if (!root) return;
-  root.textContent = '';
-  for (const item of scaleAuditRows()) {
-    const row = document.createElement('div');
-    row.className = 'scale-audit-row';
-
-    const label = document.createElement('span');
-    label.className = 'scale-label';
-    label.textContent = item.label;
-
-    const value = document.createElement('span');
-    value.className = 'scale-value';
-    value.textContent = item.factor;
-    value.dataset.tip = `${item.visual}; true-to-scale would be ${item.trueScale}`;
-
-    row.append(label, value);
-    root.appendChild(row);
-  }
-}
-
 export function bindUI(cb: UICallbacks) {
   const sliderTime  = el<HTMLInputElement>('slider-time');
   const sliderZoom  = el<HTMLInputElement>('slider-zoom');
@@ -67,8 +44,6 @@ export function bindUI(cb: UICallbacks) {
   const togMP       = el<HTMLInputElement>('toggle-manypasts');
   const togSG       = el<HTMLInputElement>('toggle-selfgrav');
   const qualitySel  = document.getElementById('quality-select') as HTMLSelectElement | null;
-
-  renderScaleAuditPanel();
 
   // Init from state. paintTransport / refreshPresetState rely on `chips`
   // being declared, so we set up the chip refs BEFORE the first repaint

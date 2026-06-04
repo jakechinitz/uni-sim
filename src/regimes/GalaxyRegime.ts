@@ -151,6 +151,7 @@ export class GalaxyRegime extends Regime {
   private centerInit = false;
   // Experimental self-gravity (PM N-body) state.
   private sgActive = false;
+  private sgPrevCx = 0; private sgPrevCy = 0; private sgPrevCz = 0;  // for SMBH-drag follow
   private sgKx: Float64Array | null = null;
   private sgKz: Float64Array | null = null;
   private sgDens = new Float32Array(SG_GN * SG_GN);
@@ -915,11 +916,20 @@ export class GalaxyRegime extends Regime {
     this.sgComputeAccel(cx, cz);
     let re = 0, n = 0; for (const s of this.stars) { const X = s.body.pos[0] - cx, Z = s.body.pos[2] - cz; re += X * X + Z * Z; n++; }
     this.sgInitRrms = Math.sqrt(re / Math.max(n, 1));
+    this.sgPrevCx = cx; this.sgPrevCy = cy; this.sgPrevCz = cz;
   }
 
   // One leapfrog (KDK) step + health metrics. Disk held thin (y = SMBH plane).
   private sgUpdate(visDt: number, cx: number, cy: number, cz: number) {
-    const dt = Math.min(Math.abs(visDt), SG_DT_MAX), stars = this.stars;
+    const stars = this.stars;
+    // Follow the SMBH: if it was dragged, translate the whole self-gravitating
+    // disk by the same delta so the galaxy moves with it, then keeps evolving.
+    const dcx = cx - this.sgPrevCx, dcz = cz - this.sgPrevCz;
+    this.sgPrevCx = cx; this.sgPrevCy = cy; this.sgPrevCz = cz;
+    if (dcx !== 0 || dcz !== 0) {
+      for (const s of stars) { if (s.state === 'absorbed') continue; s.body.pos[0] += dcx; s.body.pos[2] += dcz; }
+    }
+    const dt = Math.min(Math.abs(visDt), SG_DT_MAX);
     if (dt > 1e-6) {
       for (let i = 0; i < stars.length; i++) {
         const s = stars[i]; if (s.state === 'absorbed') continue;
