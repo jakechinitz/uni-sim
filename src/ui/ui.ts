@@ -61,6 +61,17 @@ export function bindUI(cb: UICallbacks) {
     btnFwd.classList.toggle('on', cb.state.direction ===  1 && cb.state.playing);
     refreshPresetState(cb.state.speedExp);
   }
+  // Self-gravity clamps Myr/s and Gyr/s to the same (stability-capped) rate, so
+  // hide Gyr/s while it's on and fold anyone parked there down to Myr/s.
+  const gyrChip = document.querySelector<HTMLButtonElement>('#speed-presets .chip[data-exp="16.5"]');
+  function applySgSpeedUI(on: boolean) {
+    if (gyrChip) gyrChip.style.display = on ? 'none' : '';
+    if (on && cb.state.speedExp > 14) {
+      cb.state.speedExp = 13.5;
+      sliderSpeed.value = '13.5';
+      refreshPresetState(13.5);
+    }
+  }
 
   cb.state.quality = qualityForLevel(cb.state.quality).level;
   if (qualitySel) qualitySel.value = cb.state.quality;
@@ -77,6 +88,7 @@ export function bindUI(cb: UICallbacks) {
   togMP.checked     = cb.state.toggles.manyPasts;
   cb.state.toggles.selfGravity = cb.state.toggles.selfGravity ?? false;
   togSG.checked     = cb.state.toggles.selfGravity;
+  applySgSpeedUI(cb.state.toggles.selfGravity);
   paintTransport();
 
   sliderTime.addEventListener('input', () => {
@@ -167,6 +179,7 @@ export function bindUI(cb: UICallbacks) {
   });
   togSG.addEventListener('change', () => {
     cb.state.toggles.selfGravity = togSG.checked;
+    applySgSpeedUI(togSG.checked);
     cb.onChange();
   });
 
@@ -257,6 +270,8 @@ export function syncControls(state: SaveData) {
   (el<HTMLInputElement>('toggle-disk-detail')).checked = state.toggles.diskDetail ?? true;
   (el<HTMLInputElement>('toggle-manypasts')).checked   = state.toggles.manyPasts ?? false;
   (el<HTMLInputElement>('toggle-selfgrav')).checked     = state.toggles.selfGravity ?? false;
+  const gyr = document.querySelector<HTMLButtonElement>('#speed-presets .chip[data-exp="16.5"]');
+  if (gyr) gyr.style.display = (state.toggles.selfGravity ?? false) ? 'none' : '';
   const qualitySel = document.getElementById('quality-select') as HTMLSelectElement | null;
   if (qualitySel) qualitySel.value = state.quality;
   (el<HTMLButtonElement>('btn-play')).textContent = state.playing ? '⏸' : '▶';

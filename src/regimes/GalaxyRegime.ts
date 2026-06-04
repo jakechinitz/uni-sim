@@ -146,6 +146,13 @@ export class GalaxyRegime extends Regime {
   // Central mass the per-star rotation rates were last computed for; when it
   // changes (a merger), every star's Ω(r) is refreshed so the curve updates.
   private lastRotMass = -1;
+  // Per-galaxy variation (seeded in the constructor) so no two look the same.
+  private armTwist = ARM_TWIST;     // density-wave spiral pitch
+  private armEcc = ARM_ECC_MAX;     // density-wave arm sharpness
+  private sgQv = SG_Q;              // self-gravity Toomre-Q
+  private sgDiskMass = SG_DISK_MASS;
+  private sgBhMass = SG_BH_MASS;
+  private sgRd = SG_RD;
   // Previous SMBH position — its per-frame motion drives the transient slosh.
   private prevCx = 0; private prevCy = 0; private prevCz = 0;
   private centerInit = false;
@@ -179,6 +186,16 @@ export class GalaxyRegime extends Regime {
     this.camera.lookAt(0, 0, 0);
 
     const rng = mulberry32(hashStr(`galaxy|${seed}`));
+    // Per-galaxy appearance/dynamics variation, from a separate stream so it
+    // doesn't perturb the existing BH/disk seeding. Ranges stay near the
+    // verified-stable values so every galaxy still reads as a galaxy.
+    const vrng = mulberry32(hashStr(`galaxy-var|${seed}`));
+    this.armTwist = 0.20 + vrng() * 0.30;   // [0.20,0.50] spiral pitch (loose↔tight)
+    this.armEcc   = 0.30 + vrng() * 0.24;   // [0.30,0.54] arm sharpness
+    this.sgQv       = 0.80 + vrng() * 0.25; // [0.80,1.05] bar strength (lower = stronger)
+    this.sgDiskMass = 1300 + vrng() * 500;  // [1300,1800] disk self-gravity mass
+    this.sgBhMass   = 55  + vrng() * 70;    // [55,125] central concentration
+    this.sgRd       = 4.3 + vrng() * 1.8;   // [4.3,6.1] disk scale length
 
     // --- Black holes ---
     // Central SMBH varies by seed: 85% have one (M ∈ ~5×10⁵..10¹⁰ M☉, log-uniform
@@ -417,10 +434,10 @@ export class GalaxyRegime extends Regime {
       // stays round and the outer arms read sharply.
       const u = rng();
       const gr = R_GAL * (0.05 + 0.95 * Math.pow(u, 0.65));
-      const ecc = ARM_ECC_MAX * Math.min(1, gr / R_GAL);
+      const ecc = this.armEcc * Math.min(1, gr / R_GAL);
       const phase0 = rng() * Math.PI * 2;
       const omega = this.circularSpeed(gr) / Math.max(gr, 0.1);
-      const phi0 = ARM_TWIST * gr;            // pattern (major-axis) angle at t=0
+      const phi0 = this.armTwist * gr;        // pattern (major-axis) angle at t=0
       const [x, z] = this.dwPos(gr, ecc, phase0, phi0);
       const y = (rng() - 0.5) * 0.5 * Math.exp(-gr / 6);
 
@@ -812,7 +829,7 @@ export class GalaxyRegime extends Regime {
   // Deposit star mass (CIC) and convolve with the kernel → in-plane force field.
   private sgField(cx: number, cz: number) {
     const N = SG_GN, span = this.sgSpan(), inv = 1 / this.sgCell();
-    const ox = cx - span, oz = cz - span, dens = this.sgDens, m = SG_DISK_MASS / N_STARS;
+    const ox = cx - span, oz = cz - span, dens = this.sgDens, m = this.sgDiskMass / N_STARS;
     dens.fill(0);
     for (const s of this.stars) {
       if (s.state === 'absorbed') continue;
@@ -864,7 +881,7 @@ export class GalaxyRegime extends Regime {
       if (s.state === 'absorbed') { this.sgAx[i] = 0; this.sgAz[i] = 0; continue; }
       const X = s.body.pos[0] - cx, Z = s.body.pos[2] - cz;
       let [gx, gz] = this.sgSample(s.body.pos[0], s.body.pos[2], cx, cz);
-      const r2 = X * X + Z * Z + SG_BH_SOFT2, inv = 1 / Math.sqrt(r2), inv3 = inv * inv * inv, fb = G_SIM * SG_BH_MASS * inv3;
+      const r2 = X * X + Z * Z + SG_BH_SOFT2, inv = 1 / Math.sqrt(r2), inv3 = inv * inv * inv, fb = G_SIM * this.sgBhMass * inv3;
       gx += -fb * X; gz += -fb * Z;
       const gN = Math.hypot(gx, gz) + 1e-30, b = nuRAR(gN / A0_SIM);
       this.sgAx[i] = b * gx; this.sgAz[i] = b * gz;
@@ -873,10 +890,10 @@ export class GalaxyRegime extends Regime {
 
   // (Re)seed a warm, Q-stable exponential disk around the SMBH and prime accel.
   private sgInit(cx: number, cy: number, cz: number) {
-    const Q = SG_Q;
+    const Q = this.sgQv;
     if (!this.sgKx) this.sgBuildKernel();
     for (const s of this.stars) {
-      let r: number; do { r = -SG_RD * Math.log(Math.random() + 1e-12); } while (r > R_GAL || r < 0.4);
+      let r: number; do { r = -this.sgRd * Math.log(Math.random() + 1e-12); } while (r > R_GAL || r < 0.4);
       const th = Math.random() * Math.PI * 2;
       s.body.pos[0] = cx + r * Math.cos(th);
       s.body.pos[2] = cz + r * Math.sin(th);
@@ -890,7 +907,7 @@ export class GalaxyRegime extends Regime {
     for (const s of this.stars) {
       const X = s.body.pos[0] - cx, Z = s.body.pos[2] - cz, r = Math.hypot(X, Z);
       let [gx, gz] = this.sgSample(s.body.pos[0], s.body.pos[2], cx, cz);
-      const r2 = X * X + Z * Z + SG_BH_SOFT2, inv = 1 / Math.sqrt(r2), inv3 = inv * inv * inv, fb = G_SIM * SG_BH_MASS * inv3;
+      const r2 = X * X + Z * Z + SG_BH_SOFT2, inv = 1 / Math.sqrt(r2), inv3 = inv * inv * inv, fb = G_SIM * this.sgBhMass * inv3;
       gx += -fb * X; gz += -fb * Z;
       const gN = Math.hypot(gx, gz) + 1e-30, b = nuRAR(gN / A0_SIM);
       const gr = -(b * gx * X + b * gz * Z) / Math.max(r, 1e-3);
@@ -898,15 +915,15 @@ export class GalaxyRegime extends Regime {
     }
     for (let bn = 0; bn < NB; bn++) vcb[bn] = cnt[bn] > 0 ? vcb[bn] / cnt[bn] : (bn > 0 ? vcb[bn - 1] : 0);
     for (let p = 0; p < 2; p++) { const t = vcb.slice(); for (let bn = 1; bn < NB - 1; bn++) vcb[bn] = (t[bn - 1] + t[bn] + t[bn + 1]) / 3; }
-    const S0 = SG_DISK_MASS / (2 * Math.PI * SG_RD * SG_RD);
+    const S0 = this.sgDiskMass / (2 * Math.PI * this.sgRd * this.sgRd);
     for (const s of this.stars) {
       const X = s.body.pos[0] - cx, Z = s.body.pos[2] - cz, r = Math.hypot(X, Z), th = Math.atan2(Z, X);
       const v = vcb[Math.min(NB - 1, (r / R_GAL * NB) | 0)], O = v / Math.max(r, 1e-3), k = Math.SQRT2 * O;
-      const Sig = S0 * Math.exp(-r / SG_RD);
-      const gbar = G_SIM * (SG_BH_MASS + SG_DISK_MASS * (1 - (1 + r / SG_RD) * Math.exp(-r / SG_RD))) / Math.max(r * r, 1e-3);
+      const Sig = S0 * Math.exp(-r / this.sgRd);
+      const gbar = G_SIM * (this.sgBhMass + this.sgDiskMass * (1 - (1 + r / this.sgRd) * Math.exp(-r / this.sgRd))) / Math.max(r * r, 1e-3);
       let sR = Q * 3.36 * G_SIM * nuRAR(gbar / A0_SIM) * Sig / Math.max(k, 1e-3); sR = Math.min(sR, 0.45 * v + 1e-6);
       const sPhi = sR * k / (2 * Math.max(O, 1e-3));
-      const vm = Math.sqrt(Math.max(0, v * v - sR * sR * (2 * r / SG_RD - 0.5)));
+      const vm = Math.sqrt(Math.max(0, v * v - sR * sR * (2 * r / this.sgRd - 0.5)));
       const g1 = this.sgGauss(), g2 = this.sgGauss(), tx = -Math.sin(th), tz = Math.cos(th);
       s.body.vel[0] = tx * vm + g1 * sR * Math.cos(th) - Math.sin(th) * g2 * sPhi;
       s.body.vel[2] = tz * vm + g1 * sR * Math.sin(th) + Math.cos(th) * g2 * sPhi;
@@ -1120,7 +1137,7 @@ export class GalaxyRegime extends Regime {
     const patternRot = patternOmega * tOrb;
     for (const star of this.stars) {
       if (star.state === 'absorbed') continue;
-      const phi = ARM_TWIST * star.gr + patternRot;   // arm (major-axis) angle
+      const phi = this.armTwist * star.gr + patternRot;   // arm (major-axis) angle
       const ang = star.phase0 + star.omega * tOrb;     // streaming around ellipse
       const [ox, oz] = this.dwPos(star.gr, star.ecc, ang, phi);
       const ex = ox + cx, ey = star.yOff + cy, ez = oz + cz;   // equilibrium (anchored to SMBH)
