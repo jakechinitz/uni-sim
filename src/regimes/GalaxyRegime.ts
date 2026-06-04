@@ -787,9 +787,11 @@ export class GalaxyRegime extends Regime {
   // when buried in a dense star field (e.g. self-gravity mode).
   private addBHPickSphere(mesh: THREE.Object3D) {
     const s = new THREE.Mesh(
-      new THREE.SphereGeometry(6, 8, 8),
+      new THREE.SphereGeometry(14, 8, 8),
       new THREE.MeshBasicMaterial({ transparent: true, opacity: 0, depthWrite: false })
     );
+    // No userData on the sphere — pick()'s parent-walk climbs to the BH mesh,
+    // which carries { type:'bh', index } (and is re-indexed on merges).
     mesh.add(s);
   }
 
