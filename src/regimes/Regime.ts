@@ -20,6 +20,7 @@ export interface RegimeContext {
   diskOn: boolean;         // galaxy spiral overlay toggle
   diskDetailOn: boolean;   // dust lanes + HII regions + arm clumps (cosmetic)
   manyPastsOn: boolean;    // §21 ghost-trajectory overlay (visible when rewinding)
+  selfGravityOn: boolean;  // galaxy disk feels its own gravity (experimental)
   dtWall: number;          // wall-clock seconds since last frame (UI animations)
   rate: number;            // current sim_sec / wall_sec from the speed slider
   quality: QualitySettings;
