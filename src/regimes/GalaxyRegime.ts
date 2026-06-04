@@ -1009,7 +1009,7 @@ export class GalaxyRegime extends Regime {
     // Visual-only shrink applied to every BH mesh so black holes don't swamp
     // the disk. Physics (merger reach, q-shell) derives from mass/rs, not mesh
     // scale, so this is purely cosmetic.
-    const VISUAL_BH_SCALE = 0.5;
+    const VISUAL_BH_SCALE = 0.25;
     for (const bh of this.bhs) {
       bh.mesh.scale.setScalar((bh.isCentral ? smbhGrowth : 1) * VISUAL_BH_SCALE);
     }
