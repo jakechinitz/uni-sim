@@ -52,6 +52,20 @@ export class SystemRegime extends Regime {
   // Photon field — propSpeed 1000 scene-units/sim-sec → visible at "Light"
   // preset (~5 wall-sec to traverse the system), blurs at faster speeds.
   private photons = new PhotonField(800, 1000, 320, new THREE.Color(0xffeac0), 0.7);
+  // Asteroid belt: N test particles on Kepler orbits under the live star
+  // gravity (they respond when the star is dragged or loses mass at death).
+  private beltN = 900;
+  private beltPts!: THREE.Points;
+  private beltGeomPos!: THREE.BufferAttribute;
+  private beltPx!: Float64Array; private beltPz!: Float64Array; private beltPy!: Float64Array;
+  private beltVx!: Float64Array; private beltVz!: Float64Array;
+  // Comets: eccentric Kepler orbits + anti-sunward tails (length ∝ 1/r —
+  // radiation-pressure direction is real physics; the length law is a cue).
+  private comets: {
+    px: number; py: number; pz: number; vx: number; vy: number; vz: number;
+    head: THREE.Sprite; tail: THREE.Line;
+    tailPos: THREE.BufferAttribute; tailCol: THREE.BufferAttribute;
+  }[] = [];
 
   constructor(aspect: number, seed: number) {
     super(aspect);
@@ -224,6 +238,82 @@ export class SystemRegime extends Regime {
       this.planets.push(pv);
     }
 
+    // ---- Asteroid belt ----
+    // A ring of test particles in a gap between the mid planets, each on its
+    // own slightly-eccentric Kepler orbit (vis-viva speeds). Integrated live
+    // under the star's gravity, so dragging the star (or its death mass-drop)
+    // visibly perturbs the whole belt.
+    this.beltPx = new Float64Array(this.beltN); this.beltPz = new Float64Array(this.beltN);
+    this.beltPy = new Float64Array(this.beltN);
+    this.beltVx = new Float64Array(this.beltN); this.beltVz = new Float64Array(this.beltN);
+    const beltPos = new Float32Array(this.beltN * 3);
+    for (let i = 0; i < this.beltN; i++) {
+      const a = 78 + rng() * 12;                    // belt band
+      const e = rng() * 0.08;
+      const ph = rng() * Math.PI * 2;
+      const r = a * (1 - e);
+      this.beltPx[i] = r * Math.cos(ph);
+      this.beltPz[i] = r * Math.sin(ph);
+      this.beltPy[i] = (rng() - 0.5) * 2.2;         // thin vertical scatter
+      const v = Math.sqrt(G_SIM * STAR_MASS * (1 / r - 0.5 / a));
+      this.beltVx[i] = -Math.sin(ph) * v;
+      this.beltVz[i] =  Math.cos(ph) * v;
+      beltPos[i * 3] = this.beltPx[i]; beltPos[i * 3 + 1] = this.beltPy[i]; beltPos[i * 3 + 2] = this.beltPz[i];
+    }
+    const beltGeom = new THREE.BufferGeometry();
+    this.beltGeomPos = new THREE.BufferAttribute(beltPos, 3).setUsage(THREE.DynamicDrawUsage);
+    beltGeom.setAttribute('position', this.beltGeomPos);
+    this.beltPts = new THREE.Points(beltGeom, new THREE.PointsMaterial({
+      color: 0xcbb89a, size: 0.7, sizeAttenuation: true,
+      transparent: true, opacity: 0, depthWrite: false,
+      blending: THREE.AdditiveBlending,
+      map: radialGlow(32, '#fff6e8', '#a89377', 'rgba(0,0,0,0)')
+    }));
+    (this.beltPts as any).raycast = () => {};       // decorative — never picked
+    this.scene.add(this.beltPts);
+
+    // ---- Comets ----
+    // Long-ellipse visitors starting at aphelion (vis-viva), so you watch them
+    // fall in, whip around the star, and climb back out. Tail always points
+    // away from the star and brightens/lengthens near perihelion.
+    const N_COMETS = 3;
+    const TAIL_SEGS = 22;
+    for (let c = 0; c < N_COMETS; c++) {
+      const a = 75 + rng() * 85;
+      const e = 0.72 + rng() * 0.20;
+      const orient = rng() * Math.PI * 2;
+      const rAp = a * (1 + e);
+      const px = rAp * Math.cos(orient), pz = rAp * Math.sin(orient);
+      const v = Math.sqrt(G_SIM * STAR_MASS * (2 / rAp - 1 / a));
+      const head = new THREE.Sprite(new THREE.SpriteMaterial({
+        map: radialGlow(64, '#eaffff', '#9adcff', 'rgba(0,0,0,0)'),
+        blending: THREE.AdditiveBlending, depthWrite: false,
+        transparent: true, opacity: 0
+      }));
+      head.scale.setScalar(2.6);
+      (head as any).raycast = () => {};
+      head.position.set(px, 0, pz);
+      this.scene.add(head);
+      const tailPosArr = new Float32Array(TAIL_SEGS * 3);
+      const tailColArr = new Float32Array(TAIL_SEGS * 3);
+      const tg = new THREE.BufferGeometry();
+      const tailPos = new THREE.BufferAttribute(tailPosArr, 3).setUsage(THREE.DynamicDrawUsage);
+      const tailCol = new THREE.BufferAttribute(tailColArr, 3).setUsage(THREE.DynamicDrawUsage);
+      tg.setAttribute('position', tailPos);
+      tg.setAttribute('color', tailCol);
+      const tail = new THREE.Line(tg, new THREE.LineBasicMaterial({
+        vertexColors: true, transparent: true, opacity: 0,
+        blending: THREE.AdditiveBlending, depthWrite: false
+      }));
+      (tail as any).raycast = () => {};
+      this.scene.add(tail);
+      this.comets.push({
+        px, py: (rng() - 0.5) * 6, pz,
+        vx: -Math.sin(orient) * v, vy: 0, vz: Math.cos(orient) * v,
+        head, tail, tailPos, tailCol
+      });
+    }
+
     // Lighting — bright point at the star plus modest ambient so the
     // dark side of each planet stays visible (not pitch-black). The
     // ACES tone mapper in App.ts compresses the bright end so cranking
@@ -288,6 +378,30 @@ export class SystemRegime extends Regime {
       stepLeapfrog(bodies, dtSim, (i, all) => accelOnRAR(i, all, G_SIM, A0_SIM));
     }
 
+    // Belt + comets: test particles under the star's live two-body pull
+    // (kick-drift at the same substep). Star-only gravity — planet tugs are
+    // negligible at this fidelity — so 900+ particles stay cheap and stable.
+    {
+      const sx = this.starBody.pos[0], sy = this.starBody.pos[1], sz = this.starBody.pos[2];
+      const GM = G_SIM * this.starBody.mass;
+      for (let s = 0; s < sub; s++) {
+        for (let i = 0; i < this.beltN; i++) {
+          const dx = this.beltPx[i] - sx, dz = this.beltPz[i] - sz;
+          const r2 = dx * dx + dz * dz + 4;
+          const inv = 1 / Math.sqrt(r2), k = -GM * inv * inv * inv;
+          this.beltVx[i] += dtSim * k * dx; this.beltVz[i] += dtSim * k * dz;
+          this.beltPx[i] += dtSim * this.beltVx[i]; this.beltPz[i] += dtSim * this.beltVz[i];
+        }
+        for (const cm of this.comets) {
+          const dx = cm.px - sx, dy = cm.py - sy, dz = cm.pz - sz;
+          const r2 = dx * dx + dy * dy + dz * dz + 4;
+          const inv = 1 / Math.sqrt(r2), k = -GM * inv * inv * inv;
+          cm.vx += dtSim * k * dx; cm.vy += dtSim * k * dy; cm.vz += dtSim * k * dz;
+          cm.px += dtSim * cm.vx; cm.py += dtSim * cm.vy; cm.pz += dtSim * cm.vz;
+        }
+      }
+    }
+
     // Update visuals
     this.starMesh.position.set(this.starBody.pos[0], this.starBody.pos[1], this.starBody.pos[2]);
     this.starLight.position.copy(this.starMesh.position);
@@ -296,6 +410,45 @@ export class SystemRegime extends Regime {
     // ignites. Fade them in from t = 0.2 Gyr (pre-planet, just star+
     // accretion disk feel) to t = 0.8 Gyr (fully formed).
     const sysAlpha = Math.min(1, Math.max(0, (ctx.time - 0.2) / 0.6));
+
+    // Belt + comet visuals. Tail: straight anti-sunward ray (radiation
+    // pressure direction), brightness and length rising sharply near
+    // perihelion (∝ 1/r) — additive color fade to black = soft alpha.
+    {
+      const arr = this.beltGeomPos.array as Float32Array;
+      for (let i = 0; i < this.beltN; i++) {
+        arr[i * 3] = this.beltPx[i]; arr[i * 3 + 1] = this.beltPy[i]; arr[i * 3 + 2] = this.beltPz[i];
+      }
+      this.beltGeomPos.needsUpdate = true;
+      (this.beltPts.material as THREE.PointsMaterial).opacity = 0.55 * sysAlpha;
+
+      const sx = this.starBody.pos[0], sy = this.starBody.pos[1], sz = this.starBody.pos[2];
+      for (const cm of this.comets) {
+        cm.head.position.set(cm.px, cm.py, cm.pz);
+        (cm.head.material as THREE.SpriteMaterial).opacity = 0.9 * sysAlpha;
+        const dx = cm.px - sx, dy = cm.py - sy, dz = cm.pz - sz;
+        const r = Math.sqrt(dx * dx + dy * dy + dz * dz) + 1e-3;
+        const ux = dx / r, uy = dy / r, uz = dz / r;
+        const L = Math.min(44, Math.max(3, 1500 / r));      // long near the star
+        const glow = Math.min(1, 42 / r + 0.15);            // bright near the star
+        const segs = cm.tailPos.count;
+        const tp = cm.tailPos.array as Float32Array;
+        const tc = cm.tailCol.array as Float32Array;
+        for (let k = 0; k < segs; k++) {
+          const f = k / (segs - 1);
+          tp[k * 3]     = cm.px + ux * L * f;
+          tp[k * 3 + 1] = cm.py + uy * L * f;
+          tp[k * 3 + 2] = cm.pz + uz * L * f;
+          const fade = (1 - f) * (1 - f) * glow;            // bright at head → black at tip
+          tc[k * 3]     = 0.55 * fade;
+          tc[k * 3 + 1] = 0.80 * fade;
+          tc[k * 3 + 2] = 1.00 * fade;
+        }
+        cm.tailPos.needsUpdate = true;
+        cm.tailCol.needsUpdate = true;
+        (cm.tail.material as THREE.LineBasicMaterial).opacity = sysAlpha;
+      }
+    }
 
     // -------- Stellar lifecycle --------
     // The system's central star ages on the cosmic clock. Below ~85 % of

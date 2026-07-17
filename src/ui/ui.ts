@@ -43,6 +43,7 @@ export function bindUI(cb: UICallbacks) {
   const togDiskD    = el<HTMLInputElement>('toggle-disk-detail');
   const togMP       = el<HTMLInputElement>('toggle-manypasts');
   const togSG       = el<HTMLInputElement>('toggle-selfgrav');
+  const togAF       = el<HTMLInputElement>('toggle-autofocus');
   const qualitySel  = document.getElementById('quality-select') as HTMLSelectElement | null;
 
   // Init from state. paintTransport / refreshPresetState rely on `chips`
@@ -79,6 +80,8 @@ export function bindUI(cb: UICallbacks) {
   togMP.checked     = cb.state.toggles.manyPasts;
   cb.state.toggles.selfGravity = cb.state.toggles.selfGravity ?? true;
   togSG.checked     = cb.state.toggles.selfGravity;
+  cb.state.toggles.autoFocus = cb.state.toggles.autoFocus ?? true;
+  togAF.checked     = cb.state.toggles.autoFocus;
   paintTransport();
 
   sliderTime.addEventListener('input', () => {
@@ -171,6 +174,10 @@ export function bindUI(cb: UICallbacks) {
     cb.state.toggles.selfGravity = togSG.checked;
     cb.onChange();
   });
+  togAF.addEventListener('change', () => {
+    cb.state.toggles.autoFocus = togAF.checked;
+    cb.onChange();
+  });
 
   // Scene picker — populated from the anchor registry. Selecting an
   // anchor swaps the rendered scene; selecting "" (Live universe)
@@ -260,6 +267,7 @@ export function syncControls(state: SaveData) {
   (el<HTMLInputElement>('toggle-disk-detail')).checked = state.toggles.diskDetail ?? true;
   (el<HTMLInputElement>('toggle-manypasts')).checked   = state.toggles.manyPasts ?? false;
   (el<HTMLInputElement>('toggle-selfgrav')).checked     = state.toggles.selfGravity ?? true;
+  (el<HTMLInputElement>('toggle-autofocus')).checked    = state.toggles.autoFocus ?? true;
   const qualitySel = document.getElementById('quality-select') as HTMLSelectElement | null;
   if (qualitySel) qualitySel.value = state.quality;
   (el<HTMLButtonElement>('btn-play')).textContent = state.playing ? '⏸' : '▶';

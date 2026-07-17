@@ -30,6 +30,7 @@ export interface SaveData {
     diskDetail?: boolean;   // dust lanes + HII regions + clumps; default ON
     manyPasts: boolean;
     selfGravity?: boolean;  // real self-gravity galaxy disk (the default); off = painted density-wave
+    autoFocus?: boolean;    // camera-ray auto-selection (reticle follows view centre); default ON
     bloom?: boolean;
   };
 }
@@ -88,6 +89,6 @@ export function emptySave(seed: number): SaveData {
     playing: true,
     quality: detectDefaultQuality(),
     logPace: false,
-    toggles: { entangle: false, disk: true, diskDetail: true, manyPasts: false, selfGravity: true }
+    toggles: { entangle: false, disk: true, diskDetail: true, manyPasts: false, selfGravity: true, autoFocus: true }
   };
 }

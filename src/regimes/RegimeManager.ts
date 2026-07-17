@@ -57,6 +57,10 @@ export class RegimeManager {
   // pumpFocus() leaves a pinned field untouched. Pins are cleared on
   // explicit unpin (background click, regime change wipes child pins).
   private pinned = new Set<keyof FocusState>();
+  // When false, the camera-ray focus fallback is disabled entirely: nothing
+  // auto-selects; only explicit click-pins set focus. App mirrors the
+  // "auto-focus" UI toggle here each frame.
+  autoFocus = true;
   // LRU cache: cacheKey → {regime, lastUsed}. Recreating GalaxyRegime is
   // expensive (BH shaders, 6k star buffer, spiral mesh), so we cache rather
   // than dispose-and-rebuild on every zoom ping-pong.
@@ -111,8 +115,9 @@ export class RegimeManager {
   setZoom(zoom: number) {
     const slice = decodeZoom(zoom);
     const switching = slice.regime !== this.currentKey;
-    if (switching) {
-      // Final publish from outgoing regime before we tear it down
+    if (switching && this.autoFocus) {
+      // Final publish from outgoing regime before we tear it down.
+      // (Skipped when auto-focus is off — only explicit click-pins commit.)
       const pub = this.current.publishFocus();
       this.applyFocus(pub);
     }
@@ -127,6 +132,7 @@ export class RegimeManager {
   // (e.g. CosmicRegime tracks which galaxy the camera ray is pointed at so
   // the focus is already correct when the user crosses into GALAXY).
   pumpFocus() {
+    if (!this.autoFocus) return;   // auto-selection disabled
     const pub = this.current.publishFocus();
     this.applyFocus(pub);
   }

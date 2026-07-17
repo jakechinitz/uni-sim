@@ -497,6 +497,7 @@ export class App {
       // Continuously refresh focus from the current regime (so the next
       // regime transition has the right child), then apply zoom — which
       // commits focus + rebuilds if (regime, focus) changed.
+      this.regimes.autoFocus = this.state.toggles.autoFocus ?? true;
       this.regimes.pumpFocus();
       this.regimes.setZoom(this.state.zoom);
 

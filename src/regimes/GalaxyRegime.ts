@@ -171,6 +171,14 @@ export class GalaxyRegime extends Regime {
   private sgOccM = new Float64Array(SG_GN * SG_GN);
   private sgInitRrms = 1;
   private sgStats = { a2: 0, drift: 0, retained: 1, verdict: 'off' };
+  // Live density-glow layer for self-gravity mode: the CIC mass grid rendered
+  // as a soft luminous disk, so the emergent galaxy reads as richly as the
+  // painted one — and honestly, since the glow IS the actual mass field.
+  private sgGlowTex!: THREE.DataTexture;
+  private sgGlowMesh!: THREE.Mesh;
+  private sgGlowMat!: THREE.ShaderMaterial;
+  private sgGlowBytes = new Uint8Array(SG_GN * SG_GN);
+  private sgGlowBlur = new Float32Array(SG_GN * SG_GN);
   private telegrapher = new TelegrapherField(2.0, new THREE.Color(0x9ee0ff));
   private manyPasts = new ManyPasts(new THREE.Color(0x9b8dff), 2.5);
   // Supernova flare pool — when a massive star dies it spawns one of
@@ -421,6 +429,54 @@ export class GalaxyRegime extends Regime {
     this.spiralMesh.rotation.x = -Math.PI / 2;
     this.scene.add(this.spiralMesh);
 
+    // Self-gravity density glow: the live CIC mass grid (48²) rendered as a
+    // soft additive disk. Blurred + linearly filtered it reads as a continuous
+    // luminous medium; tinted hot in the core → cool at the rim like the
+    // painted disk, but its structure (bar, arms, lopsidedness) is the REAL
+    // evolving mass distribution, not artwork. Visible only in SG mode.
+    this.sgGlowTex = new THREE.DataTexture(this.sgGlowBytes, SG_GN, SG_GN, THREE.RedFormat, THREE.UnsignedByteType);
+    this.sgGlowTex.magFilter = THREE.LinearFilter;
+    this.sgGlowTex.minFilter = THREE.LinearFilter;
+    this.sgGlowMat = new THREE.ShaderMaterial({
+      transparent: true, depthWrite: false, blending: THREE.AdditiveBlending,
+      uniforms: {
+        dens:      { value: this.sgGlowTex },
+        coreColor: { value: new THREE.Color('#fff2da') },
+        midColor:  { value: new THREE.Color('#ffc890') },
+        edgeColor: { value: new THREE.Color('#88b8ff') },
+        alphaGlobal: { value: 1.0 },
+      },
+      vertexShader: `
+        varying vec2 vUv;
+        void main() {
+          vUv = uv;
+          gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+        }
+      `,
+      fragmentShader: `
+        uniform sampler2D dens;
+        uniform vec3 coreColor, midColor, edgeColor;
+        uniform float alphaGlobal;
+        varying vec2 vUv;
+        void main() {
+          float d = texture2D(dens, vUv).r;   // already tone-mapped CPU-side
+          float b = d * (0.55 + 0.45 * d);    // gentle gamma for depth
+          float r01 = length(vUv - 0.5) * 2.0;
+          vec3 col = mix(coreColor, midColor, smoothstep(0.06, 0.35, r01));
+          col = mix(col, edgeColor, smoothstep(0.35, 0.85, r01));
+          // Fade hard at the plane edge so the quad never shows.
+          float edge = 1.0 - smoothstep(0.85, 1.0, r01);
+          gl_FragColor = vec4(col, b * edge * 0.85 * alphaGlobal);
+        }
+      `
+    });
+    const glowGeom = new THREE.PlaneGeometry(2 * this.sgSpan(), 2 * this.sgSpan());
+    this.sgGlowMesh = new THREE.Mesh(glowGeom, this.sgGlowMat);
+    this.sgGlowMesh.rotation.x = -Math.PI / 2;
+    this.sgGlowMesh.visible = false;
+    (this.sgGlowMesh as any).raycast = () => {};   // never intercepts picks
+    this.scene.add(this.sgGlowMesh);
+
 
     // Stars — points with per-vertex color
     this.starGeom = new THREE.BufferGeometry();
@@ -570,11 +626,11 @@ export class GalaxyRegime extends Regime {
 
     // Focus reticle on the star the camera ray is pointing at
     this.focusReticle = new THREE.Sprite(new THREE.SpriteMaterial({
-      map: radialGlow(256, 'rgba(0,0,0,0)', 'rgba(122,215,255,0.9)', 'rgba(122,215,255,0)'),
+      map: radialGlow(256, 'rgba(0,0,0,0)', 'rgba(122,215,255,0.45)', 'rgba(122,215,255,0)'),
       color: 0x7ad7ff,
       blending: THREE.AdditiveBlending,
       depthWrite: false, depthTest: false,
-      transparent: true, opacity: 0.85
+      transparent: true, opacity: 0.5
     }));
     this.focusReticle.scale.setScalar(0.8);
     this.focusReticle.visible = false;
@@ -936,6 +992,28 @@ export class GalaxyRegime extends Regime {
     this.sgPrevCx = cx; this.sgPrevCy = cy; this.sgPrevCz = cz;
   }
 
+  // Refresh the density-glow texture from the live CIC mass grid: one
+  // separable 3-tap blur (visual smoothing only — forces are untouched),
+  // then a soft exponential tone-map into bytes. ~7k ops; negligible.
+  private sgRefreshGlow() {
+    const N = SG_GN, src = this.sgDens, tmp = this.sgGlowBlur, out = this.sgGlowBytes;
+    for (let j = 0; j < N; j++) {
+      const r = j * N;
+      for (let i = 0; i < N; i++) {
+        const a = src[r + (i > 0 ? i - 1 : i)], b = src[r + i], c = src[r + (i < N - 1 ? i + 1 : i)];
+        tmp[r + i] = (a + b + c) / 3;
+      }
+    }
+    for (let j = 0; j < N; j++) {
+      for (let i = 0; i < N; i++) {
+        const a = tmp[(j > 0 ? j - 1 : j) * N + i], b = tmp[j * N + i], c = tmp[(j < N - 1 ? j + 1 : j) * N + i];
+        const m = (a + b + c) / 3;
+        out[j * N + i] = Math.min(255, 255 * (1 - Math.exp(-0.22 * m))) | 0;
+      }
+    }
+    this.sgGlowTex.needsUpdate = true;
+  }
+
   // One leapfrog (KDK) step + health metrics. Disk held thin (y = SMBH plane).
   private sgUpdate(visDt: number, cx: number, cy: number, cz: number) {
     const stars = this.stars;
@@ -1018,7 +1096,7 @@ export class GalaxyRegime extends Regime {
     // In self-gravity mode the painted shader disk is hidden, so the bare point
     // cloud carries the whole image — make the points bigger + fully opaque so
     // the emergent structure reads instead of looking sparse.
-    this.starMaterial.size = ctx.selfGravityOn ? 0.26 : 0.13;
+    this.starMaterial.size = ctx.selfGravityOn ? 0.19 : 0.13;
     if (ctx.selfGravityOn) this.starMaterial.opacity = 1.0;
     // Central SMBH grows with time (visualised as a slow accretion-disk
     // scale-up). Multiplier 0.85 → 1.15 over 0..13.8 Gyr.
@@ -1175,6 +1253,15 @@ export class GalaxyRegime extends Regime {
     // mode so the prescribed arms don't fight the emergent ones.
     this.spiralMesh.position.set(cx, cy, cz);
     if (ctx.selfGravityOn) this.spiralMesh.visible = false;
+    // Density-glow disk: live mass field as light. Follows the SMBH (the grid
+    // is centred on it) and honours the disk toggle like the painted layer.
+    const glowOn = ctx.selfGravityOn && this.sgActive && ctx.diskOn && galaxyAlpha > 0.01;
+    this.sgGlowMesh.visible = glowOn;
+    if (glowOn) {
+      this.sgRefreshGlow();
+      this.sgGlowMesh.position.set(cx, cy - 0.15, cz);
+      (this.sgGlowMat.uniforms.alphaGlobal as { value: number }).value = galaxyAlpha;
+    }
     // Push positions + lifecycle-driven colors into the point cloud.
     // Per-star: compute age, redden+brighten as we approach the lifetime,
     // then either flash (supernova → spawn a new stellar BH) or fade
@@ -1369,7 +1456,7 @@ export class GalaxyRegime extends Regime {
     if (hoverFresh && this.hoveredStarIdx >= 0 && this.hoveredStarIdx < this.stars.length) {
       const s = this.stars[this.hoveredStarIdx];
       this.picked.position.set(s.body.pos[0], s.body.pos[1], s.body.pos[2]);
-      pickerMat.opacity += (0.85 - pickerMat.opacity) * Math.min(1, ctx.dtWall * 12);
+      pickerMat.opacity += (0.38 - pickerMat.opacity) * Math.min(1, ctx.dtWall * 12);
     } else {
       pickerMat.opacity += (0 - pickerMat.opacity) * Math.min(1, ctx.dtWall * 6);
     }
@@ -1386,7 +1473,7 @@ export class GalaxyRegime extends Regime {
         this.focusReticle.position.set(s.body.pos[0], s.body.pos[1], s.body.pos[2]);
         const intraBoost = Math.min(1, Math.max(0, (ctx.zoomIntra - 0.5) * 3.0));
         // Base 0.35 visibility from click-pin + boost as you scroll in.
-        (this.focusReticle.material as THREE.SpriteMaterial).opacity = 0.35 + 0.45 * intraBoost;
+        (this.focusReticle.material as THREE.SpriteMaterial).opacity = 0.14 + 0.20 * intraBoost;
       } else {
         this.focusReticle.visible = false;
       }

@@ -657,8 +657,8 @@ html, body {
   box-shadow: 0 0 12px rgba(122,215,255,0);
 }
 #cursor.active {
-  border-color: rgba(122,215,255,0.9);
-  box-shadow: 0 0 16px rgba(122,215,255,0.7);
+  border-color: rgba(122,215,255,0.45);
+  box-shadow: 0 0 10px rgba(122,215,255,0.28);
 }
 #cursor.pickup {
   border-color: rgba(255,200,120,0.95);
