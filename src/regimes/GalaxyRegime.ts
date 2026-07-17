@@ -932,6 +932,27 @@ export class GalaxyRegime extends Regime {
     return [gx, gz];
   }
 
+  // Newtonian field at a point: PM grid + softened central mass, blended to
+  // the ANALYTIC enclosed-mass pull near/beyond the grid edge. The PM grid
+  // truncates at sgSpan(), which would strand outliers on a force cliff; the
+  // analytic tail keeps them on the paper's RAR (deep-MOND binding) instead.
+  private sgNewton(x: number, z: number, cx: number, cz: number): [number, number] {
+    const X = x - cx, Z = z - cz;
+    let [gx, gz] = this.sgSample(x, z, cx, cz);
+    const r2 = X * X + Z * Z + SG_BH_SOFT2, inv = 1 / Math.sqrt(r2), inv3 = inv * inv * inv, fb = G_SIM * this.sgBhMass * inv3;
+    gx += -fb * X; gz += -fb * Z;
+    const r = Math.sqrt(X * X + Z * Z) + 1e-6, span = this.sgSpan(), w0 = 0.78 * span;
+    if (r > w0) {
+      const x1 = r / this.sgRd;
+      const Menc = this.sgBhMass + this.sgDiskMass * (1 - (1 + x1) * Math.exp(-x1));
+      const gFar = G_SIM * Menc / (r * r);
+      const w = Math.min(1, (r - w0) / (span - w0));
+      gx = (1 - w) * gx + w * (-gFar * X / r);
+      gz = (1 - w) * gz + w * (-gFar * Z / r);
+    }
+    return [gx, gz];
+  }
+
   // RAR-boosted acceleration (disk field + light central point), stored per star.
   private sgComputeAccel(cx: number, cz: number) {
     this.sgField(cx, cz);
@@ -939,10 +960,7 @@ export class GalaxyRegime extends Regime {
     for (let i = 0; i < stars.length; i++) {
       const s = stars[i];
       if (s.state === 'absorbed') { this.sgAx[i] = 0; this.sgAz[i] = 0; continue; }
-      const X = s.body.pos[0] - cx, Z = s.body.pos[2] - cz;
-      let [gx, gz] = this.sgSample(s.body.pos[0], s.body.pos[2], cx, cz);
-      const r2 = X * X + Z * Z + SG_BH_SOFT2, inv = 1 / Math.sqrt(r2), inv3 = inv * inv * inv, fb = G_SIM * this.sgBhMass * inv3;
-      gx += -fb * X; gz += -fb * Z;
+      const [gx, gz] = this.sgNewton(s.body.pos[0], s.body.pos[2], cx, cz);
       const gN = Math.hypot(gx, gz) + 1e-30, b = nuRAR(gN / A0_SIM);
       this.sgAx[i] = b * gx; this.sgAz[i] = b * gz;
     }
@@ -953,7 +971,11 @@ export class GalaxyRegime extends Regime {
     const Q = this.sgQv;
     if (!this.sgKx) this.sgBuildKernel();
     for (const s of this.stars) {
-      let r: number; do { r = -this.sgRd * Math.log(Math.random() + 1e-12); } while (r > R_GAL || r < 0.4);
+      // Sample p(r) ∝ r·e^(−r/Rd) — the TRUE 2D exponential disk. (The old
+      // −Rd·ln(u) missed the area factor r and packed ~28% of all stars
+      // inside r<2 — 4× the physical share — which was the "everything
+      // clusters on the BH" pile-up. Gamma(2,Rd): −Rd·ln(u₁u₂).)
+      let r: number; do { r = -this.sgRd * Math.log((Math.random() + 1e-12) * (Math.random() + 1e-12)); } while (r > R_GAL || r < 0.4);
       const th = Math.random() * Math.PI * 2;
       s.body.pos[0] = cx + r * Math.cos(th);
       s.body.pos[2] = cz + r * Math.sin(th);
@@ -966,9 +988,7 @@ export class GalaxyRegime extends Regime {
     const NB = 48, vcb = new Float64Array(NB), cnt = new Float64Array(NB);
     for (const s of this.stars) {
       const X = s.body.pos[0] - cx, Z = s.body.pos[2] - cz, r = Math.hypot(X, Z);
-      let [gx, gz] = this.sgSample(s.body.pos[0], s.body.pos[2], cx, cz);
-      const r2 = X * X + Z * Z + SG_BH_SOFT2, inv = 1 / Math.sqrt(r2), inv3 = inv * inv * inv, fb = G_SIM * this.sgBhMass * inv3;
-      gx += -fb * X; gz += -fb * Z;
+      const [gx, gz] = this.sgNewton(s.body.pos[0], s.body.pos[2], cx, cz);
       const gN = Math.hypot(gx, gz) + 1e-30, b = nuRAR(gN / A0_SIM);
       const gr = -(b * gx * X + b * gz * Z) / Math.max(r, 1e-3);
       const bn = Math.min(NB - 1, (r / R_GAL * NB) | 0); if (gr > 0) { vcb[bn] += Math.sqrt(gr * r); cnt[bn]++; }
@@ -981,9 +1001,13 @@ export class GalaxyRegime extends Regime {
       const v = vcb[Math.min(NB - 1, (r / R_GAL * NB) | 0)], O = v / Math.max(r, 1e-3), k = Math.SQRT2 * O;
       const Sig = S0 * Math.exp(-r / this.sgRd);
       const gbar = G_SIM * (this.sgBhMass + this.sgDiskMass * (1 - (1 + r / this.sgRd) * Math.exp(-r / this.sgRd))) / Math.max(r * r, 1e-3);
-      let sR = Q * 3.36 * G_SIM * nuRAR(gbar / A0_SIM) * Sig / Math.max(k, 1e-3); sR = Math.min(sR, 0.45 * v + 1e-6);
+      let sR = Q * 3.36 * G_SIM * nuRAR(gbar / A0_SIM) * Sig / Math.max(k, 1e-3);
+      // Epicyclic setup is invalid inside ~0.7 Rd (Springel/makedisk floor the
+      // centre for the same reason): cap the central dispersion harder and
+      // floor the mean rotation so inner stars orbit instead of raining in.
+      sR = Math.min(sR, (r < 0.7 * this.sgRd ? 0.30 : 0.45) * v + 1e-6);
       const sPhi = sR * k / (2 * Math.max(O, 1e-3));
-      const vm = Math.sqrt(Math.max(0, v * v - sR * sR * (2 * r / this.sgRd - 0.5)));
+      const vm = Math.sqrt(Math.max(0.30 * v * v, v * v - sR * sR * (2 * r / this.sgRd - 0.5)));
       const g1 = this.sgGauss(), g2 = this.sgGauss(), tx = -Math.sin(th), tz = Math.cos(th);
       s.body.vel[0] = tx * vm + g1 * sR * Math.cos(th) - Math.sin(th) * g2 * sPhi;
       s.body.vel[2] = tz * vm + g1 * sR * Math.sin(th) + Math.cos(th) * g2 * sPhi;
