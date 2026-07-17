@@ -159,6 +159,14 @@ export class GalaxyRegime extends Regime {
   // Experimental self-gravity (PM N-body) state.
   private sgActive = false;
   private sgPrevCx = 0; private sgPrevCy = 0; private sgPrevCz = 0;  // for SMBH-drag follow
+  // Toggle continuity: when the user switches SG → painted, the evolved state
+  // (positions/velocities relative to the SMBH) is snapshotted; switching back
+  // RESUMES it instead of re-seeding, so a grown bar survives round-trips.
+  private sgSaved = false;
+  private sgSaveX = new Float64Array(N_STARS);
+  private sgSaveZ = new Float64Array(N_STARS);
+  private sgSaveVx = new Float64Array(N_STARS);
+  private sgSaveVz = new Float64Array(N_STARS);
   private sgKx: Float64Array | null = null;
   private sgKz: Float64Array | null = null;
   private sgDens = new Float32Array(SG_GN * SG_GN);
@@ -200,10 +208,10 @@ export class GalaxyRegime extends Regime {
     const vrng = mulberry32(hashStr(`galaxy-var|${seed}`));
     this.armTwist = 0.20 + vrng() * 0.30;   // [0.20,0.50] spiral pitch (loose↔tight)
     this.armEcc   = 0.30 + vrng() * 0.24;   // [0.30,0.54] arm sharpness
-    this.sgQv       = 0.80 + vrng() * 0.25; // [0.80,1.05] bar strength (lower = stronger)
+    this.sgQv       = 0.85 + vrng() * 0.25; // [0.85,1.10] bar strength (lower = stronger)
     this.sgDiskMass = 1300 + vrng() * 500;  // [1300,1800] disk self-gravity mass
     this.sgBhMass   = 55  + vrng() * 70;    // [55,125] central concentration
-    this.sgRd       = 4.3 + vrng() * 1.8;   // [4.3,6.1] disk scale length
+    this.sgRd       = 3.4 + vrng() * 1.0;   // [3.4,4.4] disk scale length (validated: tight + 99% retention)
 
     // --- Black holes ---
     // Central SMBH varies by seed: 85% have one (M ∈ ~5×10⁵..10¹⁰ M☉, log-uniform
@@ -1042,6 +1050,34 @@ export class GalaxyRegime extends Regime {
     this.sgGlowTex.needsUpdate = true;
   }
 
+  // Capture the evolved SG state (relative to the last SG-frame SMBH centre)
+  // so toggling to the painted disk and back resumes instead of re-seeding.
+  private sgSnapshot() {
+    const stars = this.stars;
+    for (let i = 0; i < stars.length; i++) {
+      const s = stars[i];
+      this.sgSaveX[i] = s.body.pos[0] - this.sgPrevCx;
+      this.sgSaveZ[i] = s.body.pos[2] - this.sgPrevCz;
+      this.sgSaveVx[i] = s.body.vel[0];
+      this.sgSaveVz[i] = s.body.vel[2];
+    }
+    this.sgSaved = true;
+  }
+
+  private sgRestore(cx: number, cy: number, cz: number) {
+    const stars = this.stars;
+    for (let i = 0; i < stars.length; i++) {
+      const s = stars[i];
+      s.body.pos[0] = cx + this.sgSaveX[i];
+      s.body.pos[2] = cz + this.sgSaveZ[i];
+      s.body.pos[1] = cy + s.yOff;
+      s.body.vel[0] = this.sgSaveVx[i];
+      s.body.vel[2] = this.sgSaveVz[i];
+    }
+    this.sgPrevCx = cx; this.sgPrevCy = cy; this.sgPrevCz = cz;
+    this.sgComputeAccel(cx, cz);   // prime the leapfrog kick
+  }
+
   // One leapfrog (KDK) step + health metrics. Disk held thin (y = SMBH plane).
   private sgUpdate(visDt: number, cx: number, cy: number, cz: number) {
     const stars = this.stars;
@@ -1231,10 +1267,14 @@ export class GalaxyRegime extends Regime {
     this.prevCx = cx; this.prevCy = cy; this.prevCz = cz;
     if (ctx.selfGravityOn) {
       // Experimental: real PM self-gravity + RAR. (Re)seed on enable.
-      if (!this.sgActive) { this.sgInit(cx, cy, cz); this.sgActive = true; }
+      if (!this.sgActive) {
+        if (this.sgSaved) this.sgRestore(cx, cy, cz);   // resume the evolved disk
+        else this.sgInit(cx, cy, cz);                    // first enable: seed fresh
+        this.sgActive = true;
+      }
       this.sgUpdate(visDt, cx, cy, cz);
     } else {
-    if (this.sgActive) this.sgActive = false;
+    if (this.sgActive) { this.sgSnapshot(); this.sgActive = false; }
     // Stable step for the slosh oscillator (semi-implicit Euler is stable for
     // ω·dt < 2; clamp so a high time-speed frame can't blow it up).
     const pdt = Math.min(Math.abs(visDt), 0.4);
