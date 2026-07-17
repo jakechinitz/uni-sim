@@ -61,17 +61,8 @@ export function bindUI(cb: UICallbacks) {
     btnFwd.classList.toggle('on', cb.state.direction ===  1 && cb.state.playing);
     refreshPresetState(cb.state.speedExp);
   }
-  // Self-gravity clamps Myr/s and Gyr/s to the same (stability-capped) rate, so
-  // hide Gyr/s while it's on and fold anyone parked there down to Myr/s.
-  const gyrChip = document.querySelector<HTMLButtonElement>('#speed-presets .chip[data-exp="16.5"]');
-  function applySgSpeedUI(on: boolean) {
-    if (gyrChip) gyrChip.style.display = on ? 'none' : '';
-    if (on && cb.state.speedExp > 14) {
-      cb.state.speedExp = 13.5;
-      sliderSpeed.value = '13.5';
-      refreshPresetState(13.5);
-    }
-  }
+  // (Gyr/s visibility while self-gravity is active is handled per-frame in
+  // App.loop — it depends on the current REGIME, not just the toggle.)
 
   cb.state.quality = qualityForLevel(cb.state.quality).level;
   if (qualitySel) qualitySel.value = cb.state.quality;
@@ -86,9 +77,8 @@ export function bindUI(cb: UICallbacks) {
   togDiskD.checked  = cb.state.toggles.diskDetail;
   cb.state.toggles.manyPasts = cb.state.toggles.manyPasts ?? false;
   togMP.checked     = cb.state.toggles.manyPasts;
-  cb.state.toggles.selfGravity = cb.state.toggles.selfGravity ?? false;
+  cb.state.toggles.selfGravity = cb.state.toggles.selfGravity ?? true;
   togSG.checked     = cb.state.toggles.selfGravity;
-  applySgSpeedUI(cb.state.toggles.selfGravity);
   paintTransport();
 
   sliderTime.addEventListener('input', () => {
@@ -179,7 +169,6 @@ export function bindUI(cb: UICallbacks) {
   });
   togSG.addEventListener('change', () => {
     cb.state.toggles.selfGravity = togSG.checked;
-    applySgSpeedUI(togSG.checked);
     cb.onChange();
   });
 
@@ -236,11 +225,12 @@ export function bindUI(cb: UICallbacks) {
   }
 }
 
-export function setHud(parts: { time: string; zoom: string; speed: string; epoch: string }) {
+export function setHud(parts: { time: string; zoom: string; speed: string; epoch: string; scale: string }) {
   (el<HTMLSpanElement>('hud-time')).textContent  = parts.time;
   (el<HTMLSpanElement>('hud-zoom')).textContent  = parts.zoom;
   (el<HTMLSpanElement>('hud-speed')).textContent = parts.speed;
   (el<HTMLDivElement>('hud-epoch')).textContent  = parts.epoch;
+  (el<HTMLDivElement>('hud-scale')).textContent  = parts.scale;
 }
 
 // Show / hide / populate the anchor info panel. Called by App whenever
@@ -269,9 +259,7 @@ export function syncControls(state: SaveData) {
   (el<HTMLInputElement>('toggle-disk')).checked     = state.toggles.disk ?? true;
   (el<HTMLInputElement>('toggle-disk-detail')).checked = state.toggles.diskDetail ?? true;
   (el<HTMLInputElement>('toggle-manypasts')).checked   = state.toggles.manyPasts ?? false;
-  (el<HTMLInputElement>('toggle-selfgrav')).checked     = state.toggles.selfGravity ?? false;
-  const gyr = document.querySelector<HTMLButtonElement>('#speed-presets .chip[data-exp="16.5"]');
-  if (gyr) gyr.style.display = (state.toggles.selfGravity ?? false) ? 'none' : '';
+  (el<HTMLInputElement>('toggle-selfgrav')).checked     = state.toggles.selfGravity ?? true;
   const qualitySel = document.getElementById('quality-select') as HTMLSelectElement | null;
   if (qualitySel) qualitySel.value = state.quality;
   (el<HTMLButtonElement>('btn-play')).textContent = state.playing ? '⏸' : '▶';

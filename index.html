@@ -9,15 +9,23 @@
 </head>
 <body>
   <canvas id="c"></canvas>
+  <!-- Cinematic vignette + top fade. Pure CSS, pointer-events none. -->
+  <div id="vignette"></div>
 
-  <div id="hud-epoch">—</div>
-  <div id="hud-disclaimer" data-tip="A real black hole's Schwarzschild radius is far below one pixel at galaxy scale, so the disks here are inflated purely so you can see them. Every physics label (r_s, T_H, S_BH) uses the literal Schwarzschild / Hawking / RAR / closure formulas — only the on-screen size is scaled up.">Black hole size: shown ≈5×10⁷× actual diameter (for visibility) · all labels are real</div>
+  <!-- Top-left status stack: epoch (hero), scale readout, honesty line, keys. -->
+  <div id="status">
+    <div id="hud-epoch">—</div>
+    <div id="hud-scale" data-tip="Approximate physical width of the current view. COSMIC/GALAXY/SYSTEM are to relative scale; ATOMIC and SUBSTRATE are schematic (drawn far larger than reality so structure is visible).">—</div>
+    <div id="hud-disclaimer" data-tip="A real black hole's Schwarzschild radius is far below one pixel at galaxy scale, so the disks here are inflated purely so you can see them. Every physics label (r_s, T_H, S_BH) uses the literal Schwarzschild / Hawking / RAR / closure formulas — only the on-screen size is scaled up.">black hole size shown ≈5×10⁷× actual · all labels are real physics</div>
+    <div id="hud-keys">space play/pause · T tour · esc release</div>
+  </div>
+
   <div id="ui">
-    <!-- Row 1: transport + time + zoom -->
+    <!-- Row 1: the journey — transport, cosmic time, zoom through scales -->
     <div class="row row-main">
       <div class="cluster">
         <button id="btn-rewind"  data-tip="Rewind time toward the Big Bang">⏪</button>
-        <button id="btn-play"    data-tip="Play / pause the cosmic clock">▶</button>
+        <button id="btn-play"    data-tip="Play / pause the cosmic clock (space)">▶</button>
         <button id="btn-forward" data-tip="Play forward in time">⏩</button>
       </div>
 
@@ -46,18 +54,19 @@
         <div class="zoom-track">
           <input id="slider-zoom" type="range" min="0" max="1" step="0.0001" value="0.07" />
           <div class="zoom-bands">
-            <span style="left:0%;   width:20%" data-tip="Cosmic web — ~220 galaxies, filaments, EDE pulse">COS</span>
-            <span style="left:20%;  width:20%" data-tip="Galaxy — spiral disk, SMBH, 3,500 solar systems">GAL</span>
+            <span style="left:0%;   width:20%" data-tip="Cosmic web — filaments of galaxies, EDE pulse">COS</span>
+            <span style="left:20%;  width:20%" data-tip="Galaxy — spiral disk, SMBH, thousands of solar systems">GAL</span>
             <span style="left:40%;  width:20%" data-tip="Solar system — star + 3–9 planets on Kepler orbits">SYS</span>
             <span style="left:60%;  width:20%" data-tip="Atomic — schematic atoms + electron shells">ATM</span>
             <span style="left:80%;  width:20%" data-tip="Substrate — 16³ telegrapher PDE, defects, q-field">SUB</span>
           </div>
         </div>
         <span class="val" id="hud-zoom">COSMIC ▸ 0.40</span>
+        <button id="btn-tour" class="pill-btn small" data-tip="Cinematic tour (T): fly the zoom slowly from the cosmic web all the way down to the substrate — powers-of-ten style. Press again (or grab the zoom) to stop.">✦ tour</button>
       </label>
     </div>
 
-    <!-- Row 2: speed slider with chips on its own line + toggles + actions -->
+    <!-- Row 2: rate · layers · scene · file -->
     <div class="row row-sub">
       <label class="slider speed-slider" data-tip="How fast cosmic time advances. Drag left for slow-mo, right for fast-forward.">
         <span class="lbl">speed</span>
@@ -74,13 +83,17 @@
         <button class="chip" data-exp="16.5" data-tip="One billion years per real-second (watch the universe evolve)">Gyr/s</button>
       </div>
 
+      <span class="divider" aria-hidden="true"></span>
+
       <div class="cluster">
         <label class="pill" data-tip="Show the entanglement-substrate field around masses. Each body carries its own halo; dragging moves it."><input id="toggle-entangle" type="checkbox" /><span>entanglement</span></label>
         <label class="pill" data-tip="Show the spiral disk overlay in galaxy view. Turn off to see just the stars + BHs."><input id="toggle-disk" type="checkbox" checked /><span>disk</span></label>
         <label class="pill" data-tip="Add dust lanes + pink HII star-forming regions + clumpy arm texture. Decorative — not part of the paper, but matches what real spirals look like in images."><input id="toggle-disk-detail" type="checkbox" checked /><span>disk-detail</span></label>
         <label class="pill" data-tip="Many-Pasts (paper §21). When rewinding, faint ghost trajectories show alternate histories consistent with the present."><input id="toggle-manypasts" type="checkbox" /><span>many-pasts</span></label>
-        <label class="pill" data-tip="Self-gravity (experimental). Replaces the painted density-wave spiral with REAL physics: the disk's stars feel each other's gravity through the paper's RAR, so a bar + spiral structure emerges and evolves on its own — the actual MOND dynamics rather than a painting. Heavier to compute, and necessarily more diffuse than the painted disk: that's what a genuine self-gravitating disk looks like at this star count."><input id="toggle-selfgrav" type="checkbox" /><span>self-gravity</span></label>
+        <label class="pill" data-tip="Self-gravity (the default). The galaxy disk is REAL physics: stars feel each other's gravity through the paper's RAR, so a bar + spiral emerge and evolve on their own — the actual MOND dynamics. Untick for the painted density-wave disk instead: crisper and cheaper (a visualization, not a simulation), and the disk/disk-detail layers apply to it."><input id="toggle-selfgrav" type="checkbox" checked /><span>self-gravity</span></label>
       </div>
+
+      <span class="divider" aria-hidden="true"></span>
 
       <div class="cluster">
         <label class="select-wrap" data-tip="Low caps pixel ratio and disables lensing; Medium is the default hosted setting; High preserves the full local visual pass.">
@@ -100,6 +113,8 @@
         </label>
         <button id="btn-closure" class="pill-btn" data-tip="Show the live derivation chain that takes 1,680 tetrahedral microstates to Newton's G">closure</button>
       </div>
+
+      <span class="divider" aria-hidden="true"></span>
 
       <div class="cluster">
         <button id="btn-save"    data-tip="Download the current universe as a JSON save file">save</button>

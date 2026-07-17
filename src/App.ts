@@ -36,6 +36,10 @@ export class App {
   private clock = new Clock();
   private state: SaveData;
   private prevTime = 1; // ensure first frame with time≈0 fires the bang flash
+  // Cinematic tour: when active, the zoom slider is flown slowly inward
+  // (cosmic web → substrate) — a powers-of-ten descent. Purely drives the
+  // existing zoom value; no physics is touched. 'T' or the ✦ tour button.
+  private tourActive = false;
   private controls!: OrbitControls;
   private drag!: DragController;
   private canvas!: HTMLCanvasElement;
@@ -114,8 +118,26 @@ export class App {
       if (ev.key === 'Escape') {
         unpinHoverCard();
         this.regimes.unpinAll();
+        this.setTour(false);
+        return;
+      }
+      // Don't steal keys while the user is typing in a form control.
+      const tag = (ev.target as HTMLElement | null)?.tagName;
+      if (tag === 'INPUT' || tag === 'SELECT' || tag === 'TEXTAREA') return;
+      if (ev.key === ' ') {
+        ev.preventDefault();   // stop page scroll / button re-trigger
+        (document.getElementById('btn-play') as HTMLButtonElement | null)?.click();
+      } else if (ev.key === 't' || ev.key === 'T') {
+        this.setTour(!this.tourActive);
       }
     });
+
+    // ✦ tour — fly the zoom slowly from the cosmic web down to the substrate.
+    const tourBtn = document.getElementById('btn-tour') as HTMLButtonElement | null;
+    if (tourBtn) tourBtn.addEventListener('click', () => this.setTour(!this.tourActive));
+    // Taking manual control of the zoom (wheel handled in onWheel) ends the tour.
+    (document.getElementById('slider-zoom') as HTMLInputElement | null)
+      ?.addEventListener('input', () => this.setTour(false));
 
     // Install OrbitControls on the initial regime and re-install on every
     // regime swap so the controls track whichever camera is active.
@@ -351,6 +373,7 @@ export class App {
     // wheel event pass through to OrbitControls untouched.
     if (this.anchors.current) return;
     ev.preventDefault();
+    this.setTour(false);   // manual zoom takes over from the tour
     // Per-pixel wheel deltas vary by device. Tuned so a single mouse-wheel
     // notch (deltaY ≈ 100) moves the slider by ~0.02, meaning ~12 notches
     // to cross one regime band. Feels comparable to slider drag speed.
@@ -362,6 +385,34 @@ export class App {
     const sl = document.getElementById('slider-zoom') as HTMLInputElement;
     if (sl) sl.value = String(z);
   };
+
+  // Start/stop the cinematic zoom tour. Starting near the deep end restarts
+  // from the cosmic web so the flight always has somewhere to go.
+  private setTour(on: boolean) {
+    if (on && this.anchors.current) return;      // tours are for the live universe
+    this.tourActive = on;
+    const btn = document.getElementById('btn-tour');
+    if (btn) btn.classList.toggle('on', on);
+    if (on && this.state.zoom > 0.95) this.state.zoom = 0;
+  }
+
+  // Approximate physical width of the current view, for the HUD scale line.
+  // COSMIC/GALAXY/SYSTEM are to relative scale; ATOMIC and SUBSTRATE are
+  // schematic (the readout says so). Interpolates log-linearly within a band.
+  private scaleReadout(regime: RegimeKey, intra: number): string {
+    const BANDS: Record<RegimeKey, [number, number, string]> = {
+      COSMIC:    [25.5, 23.5, 'the cosmic web'],
+      GALAXY:    [21.3, 20.0, 'a spiral galaxy'],
+      SYSTEM:    [13.3, 11.5, 'a planetary system'],
+      ATOMIC:    [-8.5, -10.0, 'atoms · schematic'],
+      SUBSTRATE: [-34.5, -35.0, 'the substrate lattice · schematic'],
+    };
+    const [hi, lo, label] = BANDS[regime];
+    const e = Math.round(hi + (lo - hi) * Math.min(1, Math.max(0, intra)));
+    const SUP: Record<string, string> = { '-': '⁻', '0': '⁰', '1': '¹', '2': '²', '3': '³', '4': '⁴', '5': '⁵', '6': '⁶', '7': '⁷', '8': '⁸', '9': '⁹' };
+    const sup = String(e).split('').map(c => SUP[c] ?? c).join('');
+    return `view ≈ 10${sup} m · ${label}`;
+  }
 
   private loop = () => {
     requestAnimationFrame(this.loop);
@@ -396,9 +447,37 @@ export class App {
     }
     this.prevTime = tGyr;
 
+    // Cinematic tour: fly the zoom inward at a slow, constant pace
+    // (~80 s for the full cosmic-web → substrate descent).
+    if (this.tourActive) {
+      this.state.zoom = Math.min(1, this.state.zoom + dtWall / 80);
+      const zl = document.getElementById('slider-zoom') as HTMLInputElement | null;
+      if (zl) zl.value = String(this.state.zoom);
+      if (this.state.zoom >= 1) this.setTour(false);
+    }
+
     const ede  = edePulse(tGyr);
     const slice = decodeZoom(this.state.zoom);
     this.state.regime = slice.regime;
+
+    // Self-gravity clamps Myr/s and Gyr/s to the same stability-capped rate,
+    // but only the GALAXY regime runs that integrator — at cosmic scale Gyr/s
+    // is genuinely faster. So hide the Gyr/s chip (and fold the rate down)
+    // only while actually looking at a self-gravitating galaxy.
+    const sgGalaxy = (this.state.toggles.selfGravity ?? true) && slice.regime === 'GALAXY' && !this.anchors.current;
+    const gyrChip = document.querySelector<HTMLButtonElement>('#speed-presets .chip[data-exp="16.5"]');
+    if (gyrChip) {
+      const want = sgGalaxy ? 'none' : '';
+      if (gyrChip.style.display !== want) gyrChip.style.display = want;
+    }
+    if (sgGalaxy && this.state.speedExp > 14) {
+      this.state.speedExp = 13.5;
+      this.clock.speedExp = 13.5;
+      const sp = document.getElementById('slider-speed') as HTMLInputElement | null;
+      if (sp) sp.value = '13.5';
+      document.querySelectorAll<HTMLButtonElement>('#speed-presets .chip').forEach(ch =>
+        ch.classList.toggle('on', Math.abs(parseFloat(ch.dataset.exp ?? '') - 13.5) < 0.05));
+    }
 
     // If an anchor scene is active, take the alternate render path —
     // we skip the regime flow entirely and just step + render the anchor.
@@ -430,7 +509,7 @@ export class App {
         diskOn: this.state.toggles.disk ?? true,
         diskDetailOn: this.state.toggles.diskDetail ?? true,
         manyPastsOn: (this.state.toggles.manyPasts ?? false) && this.clock.direction === -1 && this.clock.playing,
-        selfGravityOn: this.state.toggles.selfGravity ?? false,
+        selfGravityOn: this.state.toggles.selfGravity ?? true,
         dtWall,
         rate: this.clock.speed,
         quality,
@@ -462,7 +541,8 @@ export class App {
       speed: this.clock.useLogPace
         ? `log-pace · ${this.clock.logPaceWallSec}s sweep`
         : formatRate(this.clock.speed),
-      epoch: ep.label
+      epoch: ep.label,
+      scale: this.scaleReadout(slice.regime, slice.intra)
     });
 
     // Substrate info panel — visible only at SUBSTRATE scale
