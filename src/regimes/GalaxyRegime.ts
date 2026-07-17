@@ -462,11 +462,15 @@ export class GalaxyRegime extends Regime {
           float d = texture2D(dens, vUv).r;   // already tone-mapped CPU-side
           float b = d * (0.55 + 0.45 * d);    // gentle gamma for depth
           float r01 = length(vUv - 0.5) * 2.0;
+          // The bulge saturates the grid and the star points + BH already
+          // blaze there — attenuate the glow's core so the mid-disk arms
+          // and bar carry the light instead of one blown-white oval.
+          b *= mix(0.22, 1.0, smoothstep(0.04, 0.30, r01));
           vec3 col = mix(coreColor, midColor, smoothstep(0.06, 0.35, r01));
           col = mix(col, edgeColor, smoothstep(0.35, 0.85, r01));
           // Fade hard at the plane edge so the quad never shows.
           float edge = 1.0 - smoothstep(0.85, 1.0, r01);
-          gl_FragColor = vec4(col, b * edge * 0.85 * alphaGlobal);
+          gl_FragColor = vec4(col, b * edge * 0.75 * alphaGlobal);
         }
       `
     });
@@ -1008,7 +1012,7 @@ export class GalaxyRegime extends Regime {
       for (let i = 0; i < N; i++) {
         const a = tmp[(j > 0 ? j - 1 : j) * N + i], b = tmp[j * N + i], c = tmp[(j < N - 1 ? j + 1 : j) * N + i];
         const m = (a + b + c) / 3;
-        out[j * N + i] = Math.min(255, 255 * (1 - Math.exp(-0.22 * m))) | 0;
+        out[j * N + i] = Math.min(255, 255 * (1 - Math.exp(-0.38 * m))) | 0;
       }
     }
     this.sgGlowTex.needsUpdate = true;
