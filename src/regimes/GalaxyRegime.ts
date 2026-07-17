@@ -412,7 +412,7 @@ export class GalaxyRegime extends Regime {
                        fbm(vec2(ang * 7.0, t * 14.0) + time * 0.07)) * arm2;
 
           // --- combined intensity ---
-          float intensity = (1.5 * bulge + disk * (0.55 + 0.95 * armStr)) * dustMod;
+          float intensity = (1.6 * bulge + disk * (0.65 + 1.10 * armStr)) * dustMod;
 
           // --- color palette by radius ---
           vec3 col = mix(edgeColor, midColor, smoothstep(0.8, 0.25, t));

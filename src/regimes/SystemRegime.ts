@@ -18,6 +18,7 @@ const A0_SIM    = 1e-9;     // effectively Newton at this scale
 const N_BG_STARS = 1400;    // background "galactic neighbourhood" stars
 
 interface PlanetView {
+  atmo?: THREE.Sprite;   // soft always-on atmosphere halo
   body: Body;
   mesh: THREE.Mesh;
   trail: THREE.Line;
@@ -181,7 +182,7 @@ export class SystemRegime extends Regime {
           color: planetCol,
           roughness: 0.55,
           metalness: 0.0,
-          emissive: planetCol.clone().multiplyScalar(0.06),
+          emissive: planetCol.clone().multiplyScalar(0.22),
           transparent: true,
           opacity: 0
         })
@@ -201,7 +202,7 @@ export class SystemRegime extends Regime {
       const tg = new THREE.BufferGeometry();
       tg.setAttribute('position', new THREE.BufferAttribute(trailPositions, 3).setUsage(THREE.DynamicDrawUsage));
       const tm = new THREE.LineBasicMaterial({
-        color: planetCol, transparent: true, opacity: 0.35,
+        color: planetCol, transparent: true, opacity: 0.5,
         blending: THREE.AdditiveBlending, depthWrite: false
       });
       const trail = new THREE.Line(tg, tm);
@@ -219,7 +220,19 @@ export class SystemRegime extends Regime {
       entHalo.scale.setScalar(radius * 4.5);
       mesh.add(entHalo);
 
-      const pv: PlanetView = { body, mesh, trail, trailPositions, trailHead: 0, entHalo };
+      // Soft atmosphere rim — a faint colorized halo so each planet pops
+      // against black even when its lit crescent is thin or it's far out.
+      const atmo = new THREE.Sprite(new THREE.SpriteMaterial({
+        map: radialGlow(128, 'rgba(255,255,255,0.55)', 'rgba(160,190,255,0.22)', 'rgba(0,0,0,0)'),
+        color: planetCol,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false, transparent: true, opacity: 0
+      }));
+      atmo.scale.setScalar(radius * 2.9);
+      (atmo as any).raycast = () => {};
+      mesh.add(atmo);
+
+      const pv: PlanetView = { body, mesh, trail, trailPositions, trailHead: 0, entHalo, atmo };
 
       // Saturn-style ring for one planet
       if (i === 3) {
@@ -318,10 +331,10 @@ export class SystemRegime extends Regime {
     // dark side of each planet stays visible (not pitch-black). The
     // ACES tone mapper in App.ts compresses the bright end so cranking
     // intensity doesn't blow out the lit hemisphere.
-    this.starLight = new THREE.PointLight(0xfff2c8, 30, 4000, 0.9);
+    this.starLight = new THREE.PointLight(0xfff2c8, 34, 4000, 0.55);
     this.starLight.position.set(0, 0, 0);
     this.scene.add(this.starLight);
-    this.scene.add(new THREE.AmbientLight(0x1a1d24, 0.55));
+    this.scene.add(new THREE.AmbientLight(0x2a3140, 0.95));
 
     // Entanglement field — dipolar field lines
     const lineCount = 24;
@@ -487,6 +500,7 @@ export class SystemRegime extends Regime {
       const pv = this.planets[i];
       const m = pv.mesh.material as THREE.MeshStandardMaterial;
       m.opacity = sysAlpha;
+      if (pv.atmo) (pv.atmo.material as THREE.SpriteMaterial).opacity = 0.16 * sysAlpha;
       if (pv.ring) {
         const rm = pv.ring.material as THREE.MeshBasicMaterial;
         rm.opacity = 0.7 * sysAlpha;
