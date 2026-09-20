@@ -37,8 +37,15 @@ const NU_CAP    = 1 + 1 / EPS_ALLOC;                          // ≈ 6.32
 const A0_OVER_G = 0.0008 / 0.02;   // keeps the deep-MOND crossover at the same separations as before
 const SOFT      = 0.3;             // carrier support ≈ galaxy size (sim units, physical)
 const T_NBODY_START = 1.0;         // Gyr — before this the web is frozen comoving (not yet assembled)
-const DT_MAX  = 0.04;              // Gyr per leapfrog substep
-const SUB_MAX = 6;                 // per frame; larger scrub jumps make the web lag, not tear
+const DT_MAX  = 0.1;               // Gyr per leapfrog substep (validated: identical to 1/30)
+// The comoving state is kept in sync with cosmic time: the web at time t is
+// the ICs evolved from T_NBODY_START to t, however you got there (play,
+// scrub, load, returning from a galaxy). A jump is caught up at
+// CATCHUP_GYR per frame — a ~½ s "web assembling" — and a rewind larger than
+// REWIND_REPLAY_GYR in one frame re-seeds and replays (small rewinds just run
+// the reversible integrator backwards).
+const CATCHUP_GYR = 0.5;
+const REWIND_REPLAY_GYR = 1.0;
 
 interface Galaxy {
   id: string;
@@ -67,10 +74,12 @@ export class CosmicRegime extends Regime {
   // Comoving N-body state (see constants above)
   private G = 0;
   private A0 = 0;
-  private prevT = -1;
-  private prevA = 1;
+  private simT = T_NBODY_START;      // cosmic time the comoving state currently corresponds to
+  private lastCtxT = -1;
   private gyrPerWall = 1;            // last frame's cosmic Gyr per wall-second (for throw velocities)
   private accBuf = new Float64Array(N_GAL * 3);
+  private icPos = new Float64Array(N_GAL * 3);   // seeded ICs, for reseed/replay
+  private icVel = new Float64Array(N_GAL * 3);
   private manyPasts = new ManyPasts(new THREE.Color(0x9b8dff), 3.5);
   // Inflation flash: tracks seconds since the last "Big Bang event" so
   // the radiation-noise quad visibly inflates from a point.
@@ -221,6 +230,11 @@ export class CosmicRegime extends Regime {
       this.G  = 3 * H0 * H0 / (8 * Math.PI * rho);
       this.A0 = this.G * A0_OVER_G;
     }
+    for (let i = 0; i < this.galaxies.length; i++) {
+      const b = this.galaxies[i].body;
+      this.icPos[i * 3] = b.pos[0]; this.icPos[i * 3 + 1] = b.pos[1]; this.icPos[i * 3 + 2] = b.pos[2];
+      this.icVel[i * 3] = b.vel[0]; this.icVel[i * 3 + 1] = b.vel[1]; this.icVel[i * 3 + 2] = b.vel[2];
+    }
 
     // Filaments — connect each galaxy to its 2 nearest neighbours
     const pairs: [number, number][] = [];
@@ -368,23 +382,11 @@ export class CosmicRegime extends Regime {
     // equations: free comoving velocities decay as u ∝ a⁻² (Hubble drag),
     // and forces are evaluated at physical separation a·x then divided by a.
     void dt;
-    const aNow = scaleFactor(t);
-    if (this.prevT < 0) { this.prevT = t; this.prevA = aNow; }
-    let dtGyr = t - this.prevT;
-    this.prevT = t;
-    if (ctx.dtWall > 0 && dtGyr !== 0) this.gyrPerWall = Math.abs(dtGyr) / ctx.dtWall;
-    if (dtGyr !== 0 && t >= T_NBODY_START && this.prevA > 0) {
-      dtGyr = Math.max(-DT_MAX * SUB_MAX, Math.min(DT_MAX * SUB_MAX, dtGyr));
-      const sub = Math.min(SUB_MAX, Math.max(1, Math.ceil(Math.abs(dtGyr) / DT_MAX)));
-      const drag = (this.prevA / aNow) ** 2;
-      for (const g of this.galaxies) {
-        if (g.body.fixed) continue;
-        g.body.vel[0] *= drag; g.body.vel[1] *= drag; g.body.vel[2] *= drag;
-      }
-      const h = dtGyr / sub;
-      for (let k = 0; k < sub; k++) this.stepComoving(h, aNow);
+    if (this.lastCtxT >= 0 && ctx.dtWall > 0 && t !== this.lastCtxT) {
+      this.gyrPerWall = Math.abs(t - this.lastCtxT) / ctx.dtWall;
     }
-    this.prevA = aNow;
+    this.lastCtxT = t;
+    this.syncTo(t);
     // Apply combined Hubble flow + EDE breath to positions
     for (const g of this.galaxies) {
       g.mesh.position.set(
@@ -444,6 +446,46 @@ export class CosmicRegime extends Regime {
       (this.focusReticle.material as THREE.SpriteMaterial).opacity = 0.7 * fade;
     } else {
       this.focusReticle.visible = false;
+    }
+  }
+
+  // Restore the seeded ICs (positions + small peculiar velocities).
+  private reseed() {
+    for (let i = 0; i < this.galaxies.length; i++) {
+      const b = this.galaxies[i].body;
+      b.pos[0] = this.icPos[i * 3]; b.pos[1] = this.icPos[i * 3 + 1]; b.pos[2] = this.icPos[i * 3 + 2];
+      b.vel[0] = this.icVel[i * 3]; b.vel[1] = this.icVel[i * 3 + 1]; b.vel[2] = this.icVel[i * 3 + 2];
+      b.fixed = false;
+    }
+  }
+
+  // Bring the comoving state to cosmic time t (see CATCHUP_GYR above).
+  private syncTo(t: number) {
+    if (t < T_NBODY_START) {
+      // Pre-web era: the pattern is frozen at its ICs (positions × a(t) is
+      // the visible Hubble growth from the Big Bang). Rewinding here resets.
+      if (this.simT > T_NBODY_START) this.reseed();
+      this.simT = T_NBODY_START;
+      return;
+    }
+    if (t < this.simT - REWIND_REPLAY_GYR) {        // big backward jump → replay
+      this.reseed();
+      this.simT = T_NBODY_START;
+    }
+    let budget = CATCHUP_GYR;
+    while (Math.abs(t - this.simT) > 1e-9 && budget > 0) {
+      const remaining = t - this.simT;
+      const h = Math.sign(remaining) * Math.min(DT_MAX, Math.abs(remaining), budget);
+      const aFrom = scaleFactor(this.simT), aTo = scaleFactor(this.simT + h);
+      // Hubble drag: a free comoving velocity obeys u ∝ a⁻² (exact; inverts on rewind).
+      const drag = (aFrom / aTo) ** 2;
+      for (const g of this.galaxies) {
+        if (g.body.fixed) continue;
+        g.body.vel[0] *= drag; g.body.vel[1] *= drag; g.body.vel[2] *= drag;
+      }
+      this.stepComoving(h, aTo);
+      this.simT += h;
+      budget -= Math.abs(h);
     }
   }
 
