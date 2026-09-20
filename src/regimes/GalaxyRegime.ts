@@ -51,7 +51,15 @@ const SG_BH_SOFT2 = 9.0;      // central-mass softening² (spreads the core, no 
 const SG_Q = 0.9;             // baked Toomre-Q (best from tuning: strong bar, low drift)
 const R_GAL   = 18;
 const G_SIM   = 0.0008;
-const A0_SIM  = 0.00010;
+// a0 placed where the paper puts it for a disk galaxy: the Newtonian
+// acceleration at the disk edge is a few tenths of a0 (Milky-Way-like:
+// g_bar(R_opt) ≈ 0.3–0.4 a0), so the rotation curve flattens INSIDE the disk
+// (the RAR's signature) and beyond the edge the deep-MOND tail binds stars.
+// With the old 1e-4 the whole disk was Newtonian (g_bar(R_GAL) ≈ 37 a0):
+// arm-tip stars flung by the bar coasted away on 1/r² and never returned
+// (prototype r_max 29 → 133 over 3000 steps). At 0.012 (ν ≈ 2.3 at the
+// edge) ejecta stay bounded at ~2 R_GAL and come back (r_max 29–41).
+const A0_SIM  = 0.012;
 
 interface BHView {
   mesh: BlackHole;
