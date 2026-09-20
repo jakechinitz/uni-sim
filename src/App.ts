@@ -200,6 +200,7 @@ export class App {
           tier: e.meta.tier
         })),
         onSelect: (id) => {
+          if (id !== null) this.setTour(false);   // an anchor scene takes over the view
           this.anchors.setActive(id);
           if (id === null || !this.anchors.current) {
             updateAnchorPanel(null);

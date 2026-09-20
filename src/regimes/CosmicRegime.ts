@@ -6,22 +6,39 @@ import * as THREE from 'three';
 import { Regime, RegimeContext, DragTarget, FocusState } from './Regime';
 import { mulberry32, gauss } from '../core/Rng';
 import { radialGlow } from '../render/Glow';
-import { Body, accelOnRAR, stepLeapfrog } from '../core/Gravity';
+import { Body, nuRAR } from '../core/Gravity';
 import { hashStr } from '../util/hash';
 import { smoothstep, clamp01 } from '../util/lerp';
 import { a as scaleFactor } from '../core/Cosmology';
+import { T_UNIV } from '../util/units';
 import { ManyPasts } from '../render/ManyPasts';
-import { visualRatePerWall } from '../util/timeScale';
 
 // N_GAL drives the dominant CPU cost: O(N²) per-pair RAR integration. It runs
 // at ~30 Hz (every other frame) with one substep, so 340 (~2.4x the pairs of
 // 220) stays well inside budget while giving a denser cosmic web.
 const N_GAL = 340;
-const BOX   = 60;        // sim units
+const BOX   = 60;        // sim units (comoving, a = 1)
+const IC_SIGMA = 0.58;   // IC Gaussian width / BOX — the web virialises to ~0.6× of this by today
 
-// Sim-internal gravity coupling chosen so visible motion is on order of seconds
-const G_SIM  = 0.02;
-const A0_SIM = 0.0008;   // tuned so deep-MOND kicks in for visible distances
+// Cosmic dynamics run on the COSMIC clock (Gyr) in comoving coordinates x,
+// rendered at physical positions r = a(t)·x. Two paper-derived pieces fix the
+// scale — nothing here is hand-tuned for "visible motion":
+//  - the coupling G comes from Friedmann consistency between the box's mean
+//    density and the sim's own a(t): rho_bar = 3H0²/(8πG). Gravity and
+//    expansion must balance; with the old visual G (~3000× stronger) the web
+//    free-fell, bounced and evaporated — physics that depended on the speed
+//    preset, since it ran on the visual clock.
+//  - each galaxy is a SOURCE whose committed allocation is capped at M/ε
+//    (paper §18/§20: total ≤ 1+1/ε = 6.32 per baryonic source), so its far
+//    field never exceeds 6.32× Newtonian. This is NOT a ceiling on the
+//    galactic RAR ratio (the paper says so explicitly) — GalaxyRegime is untouched.
+const EPS_ALLOC = 7.41980002357 / (4 * Math.PI * Math.PI);   // g_share,eff / 4π² ≈ 0.188
+const NU_CAP    = 1 + 1 / EPS_ALLOC;                          // ≈ 6.32
+const A0_OVER_G = 0.0008 / 0.02;   // keeps the deep-MOND crossover at the same separations as before
+const SOFT      = 0.3;             // carrier support ≈ galaxy size (sim units, physical)
+const T_NBODY_START = 1.0;         // Gyr — before this the web is frozen comoving (not yet assembled)
+const DT_MAX  = 0.04;              // Gyr per leapfrog substep
+const SUB_MAX = 6;                 // per frame; larger scrub jumps make the web lag, not tear
 
 interface Galaxy {
   id: string;
@@ -46,8 +63,14 @@ export class CosmicRegime extends Regime {
   private filMaterial: THREE.LineBasicMaterial;
   private radNoiseMesh: THREE.Mesh;
   private focusReticle!: THREE.Sprite;
-  private _nbodyTick = 0;
   private wallTime = 0;
+  // Comoving N-body state (see constants above)
+  private G = 0;
+  private A0 = 0;
+  private prevT = -1;
+  private prevA = 1;
+  private gyrPerWall = 1;            // last frame's cosmic Gyr per wall-second (for throw velocities)
+  private accBuf = new Float64Array(N_GAL * 3);
   private manyPasts = new ManyPasts(new THREE.Color(0x9b8dff), 3.5);
   // Inflation flash: tracks seconds since the last "Big Bang event" so
   // the radiation-noise quad visibly inflates from a point.
@@ -127,9 +150,9 @@ export class CosmicRegime extends Regime {
 
     // Build a deterministic galaxy field — light clustering by random walks
     for (let i = 0; i < N_GAL; i++) {
-      const x = gauss(rng) * BOX * 0.36;
-      const y = gauss(rng) * BOX * 0.36;
-      const z = gauss(rng) * BOX * 0.36 * 0.7;
+      const x = gauss(rng) * BOX * IC_SIGMA;
+      const y = gauss(rng) * BOX * IC_SIGMA;
+      const z = gauss(rng) * BOX * IC_SIGMA * 0.7;
       const mass = 0.5 + Math.pow(rng(), 2) * 3.5;
       const size = (0.16 + 0.05 * Math.sqrt(mass)) * (0.8 + rng() * 0.6);
       const hue  = 200 + rng() * 60;        // mostly bluish-white with warm outliers
@@ -157,7 +180,7 @@ export class CosmicRegime extends Regime {
         body: {
           id: `gx-${i}`,
           pos: [x, y, z],
-          vel: [gauss(rng) * 0.05, gauss(rng) * 0.05, gauss(rng) * 0.03],
+          vel: [gauss(rng) * 0.08, gauss(rng) * 0.08, gauss(rng) * 0.05],   // comoving, per Gyr (small peculiar velocities)
           mass
         },
         mesh: s,
@@ -185,6 +208,18 @@ export class CosmicRegime extends Regime {
       this.group.add(s);
       this.draggable.add(s);
       s.userData = { type: 'galaxy', galaxy: g };
+    }
+
+    // Friedmann-consistent coupling (see header). H0 from the sim's a(t).
+    {
+      const h = 1e-3;
+      const H0 = (scaleFactor(T_UNIV + h) - scaleFactor(T_UNIV - h)) / (2 * h) / scaleFactor(T_UNIV);
+      let Mtot = 0; for (const g of this.galaxies) Mtot += g.body.mass;
+      const sx = BOX * IC_SIGMA, sz = sx * 0.7;
+      const V = Math.pow(2 * Math.PI, 1.5) * sx * sx * sz;     // effective Gaussian volume
+      const rho = Mtot / V;                                     // comoving mean density (a = 1)
+      this.G  = 3 * H0 * H0 / (8 * Math.PI * rho);
+      this.A0 = this.G * A0_OVER_G;
     }
 
     // Filaments — connect each galaxy to its 2 nearest neighbours
@@ -327,22 +362,29 @@ export class CosmicRegime extends Regime {
       haloMat.opacity = ctx.entanglementOn ? 0.55 * g.fadeIn * pulse : 0;
     }
 
-    // N-body step with RAR. O(N²) per substep is the dominant CPU load
-    // in COSMIC; throttle to every other frame (≈30 Hz physics) and use
-    // a single substep with a longer dt. Cosmic positions change so
-    // slowly visually that the user can't tell.
-    this._nbodyTick = (this._nbodyTick + 1) % 2;
-    if (this._nbodyTick === 0) {
-      const bodies = this.galaxies.map(g => g.body);
-      // Speed-aware visual integration step. See visualRatePerWall:
-      // chip presets now produce distinct cosmic-web motion rates
-      // instead of all saturating at the same per-frame cap.
-      const visPerWall = visualRatePerWall(ctx.rate);
-      const visDt = visPerWall * ctx.dtWall * Math.sign(ctx.rate || 1);
-      const visClamp = Math.max(-3, Math.min(3, visDt));     // cosmic-web stability
-      stepLeapfrog(bodies, visClamp, (i, all) => accelOnRAR(i, all, G_SIM, A0_SIM));
-      void dt;
+    // ---- Comoving N-body on the COSMIC clock ----
+    // Advances by the true cosmic Δt of this frame (so the web evolves the
+    // same per Gyr at every speed preset), with the expanding-universe
+    // equations: free comoving velocities decay as u ∝ a⁻² (Hubble drag),
+    // and forces are evaluated at physical separation a·x then divided by a.
+    void dt;
+    const aNow = scaleFactor(t);
+    if (this.prevT < 0) { this.prevT = t; this.prevA = aNow; }
+    let dtGyr = t - this.prevT;
+    this.prevT = t;
+    if (ctx.dtWall > 0 && dtGyr !== 0) this.gyrPerWall = Math.abs(dtGyr) / ctx.dtWall;
+    if (dtGyr !== 0 && t >= T_NBODY_START && this.prevA > 0) {
+      dtGyr = Math.max(-DT_MAX * SUB_MAX, Math.min(DT_MAX * SUB_MAX, dtGyr));
+      const sub = Math.min(SUB_MAX, Math.max(1, Math.ceil(Math.abs(dtGyr) / DT_MAX)));
+      const drag = (this.prevA / aNow) ** 2;
+      for (const g of this.galaxies) {
+        if (g.body.fixed) continue;
+        g.body.vel[0] *= drag; g.body.vel[1] *= drag; g.body.vel[2] *= drag;
+      }
+      const h = dtGyr / sub;
+      for (let k = 0; k < sub; k++) this.stepComoving(h, aNow);
     }
+    this.prevA = aNow;
     // Apply combined Hubble flow + EDE breath to positions
     for (const g of this.galaxies) {
       g.mesh.position.set(
@@ -402,6 +444,45 @@ export class CosmicRegime extends Regime {
       (this.focusReticle.material as THREE.SpriteMaterial).opacity = 0.7 * fade;
     } else {
       this.focusReticle.visible = false;
+    }
+  }
+
+  // Pairwise comoving accelerations. Source j's far field is its RAR field
+  // at physical separation, capped at its committed allocation (NU_CAP);
+  // comoving acceleration = physical / a.
+  private accelComoving(a: number, out: Float64Array) {
+    const gs = this.galaxies, n = gs.length;
+    out.fill(0);
+    for (let i = 0; i < n; i++) {
+      const bi = gs[i].body;
+      for (let j = i + 1; j < n; j++) {
+        const bj = gs[j].body;
+        const dx = bi.pos[0] - bj.pos[0], dy = bi.pos[1] - bj.pos[1], dz = bi.pos[2] - bj.pos[2];
+        const d2 = dx * dx + dy * dy + dz * dz, rc = Math.sqrt(d2) + 1e-9;
+        const rp2 = d2 * a * a + SOFT * SOFT;                     // physical separation², softened
+        const gbj = this.G * bj.mass / rp2;                        // Newtonian from source j
+        const kij = -Math.min(NU_CAP, nuRAR(gbj / this.A0)) * gbj / a / rc;
+        const gbi = this.G * bi.mass / rp2;
+        const kji = -Math.min(NU_CAP, nuRAR(gbi / this.A0)) * gbi / a / rc;
+        out[i * 3] += kij * dx; out[i * 3 + 1] += kij * dy; out[i * 3 + 2] += kij * dz;
+        out[j * 3] -= kji * dx; out[j * 3 + 1] -= kji * dy; out[j * 3 + 2] -= kji * dz;
+      }
+    }
+  }
+
+  // Leapfrog (kick-drift-kick) in comoving coordinates at fixed a.
+  private stepComoving(h: number, a: number) {
+    const gs = this.galaxies, acc = this.accBuf;
+    this.accelComoving(a, acc);
+    for (let i = 0; i < gs.length; i++) {
+      const b = gs[i].body; if (b.fixed) continue;
+      b.vel[0] += 0.5 * h * acc[i * 3]; b.vel[1] += 0.5 * h * acc[i * 3 + 1]; b.vel[2] += 0.5 * h * acc[i * 3 + 2];
+      b.pos[0] += h * b.vel[0]; b.pos[1] += h * b.vel[1]; b.pos[2] += h * b.vel[2];
+    }
+    this.accelComoving(a, acc);
+    for (let i = 0; i < gs.length; i++) {
+      const b = gs[i].body; if (b.fixed) continue;
+      b.vel[0] += 0.5 * h * acc[i * 3]; b.vel[1] += 0.5 * h * acc[i * 3 + 1]; b.vel[2] += 0.5 * h * acc[i * 3 + 2];
     }
   }
 
@@ -468,9 +549,11 @@ export class CosmicRegime extends Regime {
       },
       onDragEnd: (v: THREE.Vector3) => {
         g.body.fixed = false;
-        g.body.vel[0] = v.x / this.edeBreath;
-        g.body.vel[1] = v.y / this.edeBreath;
-        g.body.vel[2] = v.z / this.edeBreath;
+        // world units per wall-second → comoving units per Gyr
+        const k = 1 / (this.edeBreath * Math.max(this.gyrPerWall, 1e-3));
+        g.body.vel[0] = v.x * k;
+        g.body.vel[1] = v.y * k;
+        g.body.vel[2] = v.z * k;
       }
     };
   }

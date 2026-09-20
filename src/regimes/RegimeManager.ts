@@ -43,7 +43,7 @@ function mixSeed(base: number, ctx: string): number {
 // Soft cap on how many distinct (regime, focus) scenes we keep in GPU memory.
 // Most users only ping-pong between the current galaxy and zoomed-out cosmic,
 // so 6 is comfortable headroom without holding many BH disks + star clouds.
-const CACHE_LIMIT = 6;
+const CACHE_LIMIT = 8;
 
 export class RegimeManager {
   current!: Regime;
@@ -174,16 +174,32 @@ export class RegimeManager {
       entry.lastUsed = ++this.accessCounter;
       this.current = entry.regime;
     } else {
-      // Miss — build, cache. Evict the oldest entry if at the cap.
+      // Miss — build, cache. Evict at the cap, but never the scenes whose
+      // running state IS the user's universe: the single COSMIC root (its
+      // N-body web) and the parent GALAXY of the current focus. Plain LRU
+      // used to evict exactly those after visiting a few star systems, so
+      // zooming back out rebuilt them from t=0 — "everything restarts".
+      // Leaf scenes (SYSTEM/ATOMIC/SUBSTRATE) are cheap and go first.
       if (this.cache.size >= CACHE_LIMIT) {
-        let oldestKey: string | null = null;
-        let oldestT = Infinity;
-        for (const [k, e] of this.cache) {
-          if (e.lastUsed < oldestT) { oldestT = e.lastUsed; oldestKey = k; }
+        const parentGalaxy = `GALAXY|${this.focus.galaxyId ?? ''}`;
+        const isProtected = (k: string) => k.startsWith('COSMIC|') || k === parentGalaxy;
+        const isLeaf = (k: string) => !k.startsWith('COSMIC|') && !k.startsWith('GALAXY|');
+        const passes: ((k: string) => boolean)[] = [
+          k => isLeaf(k) && !isProtected(k),
+          k => !isProtected(k),
+          () => true,
+        ];
+        let victim: string | null = null;
+        for (const ok of passes) {
+          let oldestT = Infinity;
+          for (const [k, e] of this.cache) {
+            if (ok(k) && e.lastUsed < oldestT) { oldestT = e.lastUsed; victim = k; }
+          }
+          if (victim) break;
         }
-        if (oldestKey) {
-          this.cache.get(oldestKey)!.regime.dispose();
-          this.cache.delete(oldestKey);
+        if (victim) {
+          this.cache.get(victim)!.regime.dispose();
+          this.cache.delete(victim);
         }
       }
       const Ctor = REGISTRY[key];
