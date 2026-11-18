@@ -29,6 +29,13 @@ const REGIME_LIMITS: Record<RegimeKey, { min: number; max: number }> = {
   SUBSTRATE: { min: 6,   max: 45  },
 };
 
+// Minimum camera elevation (radians above the disk plane) on arrival in the
+// regimes whose content is a thin disk.
+const ARRIVAL_ELEVATION: Partial<Record<RegimeKey, number>> = {
+  GALAXY: 0.62,   // ≈ 36°
+  SYSTEM: 0.52,   // ≈ 30°
+};
+
 export class App {
   private renderer: THREE.WebGLRenderer;
   private composer: Composer;
@@ -304,6 +311,16 @@ export class App {
     if (oldDir) {
       const lim = REGIME_LIMITS[this.regimes.currentKey];
       const startDist = lim.max * 0.95;
+      // Disk regimes live in the y = 0 plane. The cosmic camera looks along
+      // that plane by default, so inheriting its direction verbatim lands
+      // every galaxy and solar system exactly edge-on (a thin line). Keep the
+      // approach azimuth, but arrive at least this far above the disk.
+      const minElev = ARRIVAL_ELEVATION[this.regimes.currentKey];
+      if (minElev !== undefined) {
+        const az = Math.atan2(oldDir.x, oldDir.z);
+        const elev = Math.max(minElev, Math.asin(Math.max(-1, Math.min(1, oldDir.y))));
+        oldDir.set(Math.sin(az) * Math.cos(elev), Math.sin(elev), Math.cos(az) * Math.cos(elev));
+      }
       this.regimes.current.camera.position.copy(oldDir.multiplyScalar(startDist));
       this.regimes.current.camera.lookAt(this.controls.target);
     }
