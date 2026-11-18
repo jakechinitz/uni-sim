@@ -1,12 +1,14 @@
 // SYSTEM: a star + 5-8 planets on Keplerian orbits. Drag any planet/star to perturb.
-// RAR collapses to Newton at AU scale (g_bar >> a0), so orbits look correct.
+// Gravity here is Newtonian by the paper's own rule, not just as a limit: the
+// response belongs to the galaxy's carrier, and a star inside it carries no
+// transverse halo of its own (§15–§16: Q₂^{⊙,⊥} = 0; PPN γ = β = 1).
 
 import * as THREE from 'three';
 import { Regime, RegimeContext, DragTarget } from './Regime';
 import { mulberry32 } from '../core/Rng';
 import { hashStr } from '../util/hash';
 import { radialGlow } from '../render/Glow';
-import { Body, accelOnRAR, stepLeapfrog } from '../core/Gravity';
+import { Body, accelOnNewton, stepLeapfrog } from '../core/Gravity';
 import { TelegrapherField } from '../render/Telegrapher';
 import { PhotonField } from '../render/Photons';
 import { mainSeqLifetime, SUPERNOVA_MASS } from '../core/StellarLifecycle';
@@ -14,7 +16,6 @@ import { BlackHole } from '../render/BlackHole';
 import { visualRatePerWall } from '../util/timeScale';
 
 const G_SIM     = 4.0;
-const A0_SIM    = 1e-9;     // effectively Newton at this scale
 const N_BG_STARS = 1400;    // background "galactic neighbourhood" stars
 
 interface PlanetView {
@@ -388,7 +389,7 @@ export class SystemRegime extends Regime {
     void dt;   // intentional: visDt now derived from ctx.rate, not raw dt
     const bodies: Body[] = [this.starBody, ...this.planets.map(p => p.body)];
     for (let s = 0; s < sub; s++) {
-      stepLeapfrog(bodies, dtSim, (i, all) => accelOnRAR(i, all, G_SIM, A0_SIM));
+      stepLeapfrog(bodies, dtSim, (i, all) => accelOnNewton(i, all, G_SIM));
     }
 
     // Belt + comets: test particles under the star's live two-body pull

@@ -15,6 +15,7 @@ import { TelegrapherField } from '../render/Telegrapher';
 import { ManyPasts } from '../render/ManyPasts';
 import { hawkingSolar, scrambling, formatSI } from '../core/Closure';
 import { M_SUN, T_UNIV } from '../util/units';
+import { a as scaleFactor, hubbleRatio, checkpoints } from '../core/Cosmology';
 import { imfSample, mainSeqLifetime, SUPERNOVA_MASS } from '../core/StellarLifecycle';
 
 // 8,000 stars across an 18-unit disk — enough for a real spiral-galaxy
@@ -42,6 +43,7 @@ const SLOSH_DAMP = 0.25;
 // particle-mesh gravity + the paper's RAR forms a stable, confined MOND bar
 // (A2 → ~0.3 with ~98% of stars retained). Knobs trade structure↔stability.
 const SG_GN = 48;             // PM grid resolution (NxN)
+const GLOW_N = 128;           // resolution of the starlight (density-glow) texture
 const SG_DISK_MASS = 1500;    // disk self-gravity mass (sim units)
 const SG_BH_MASS = 80;        // light central mass (bar-favoring; SG-only)
 const SG_RD = 5.0;            // exponential disk scale length
@@ -190,11 +192,16 @@ export class GalaxyRegime extends Regime {
   // Live density-glow layer for self-gravity mode: the CIC mass grid rendered
   // as a soft luminous disk, so the emergent galaxy reads as richly as the
   // painted one — and honestly, since the glow IS the actual mass field.
+  // a₀ at the current epoch: a₀(z) = ε c H(z) (paper §15), in sim units.
+  private a0Eff = A0_SIM;
+  private a0AtInit = A0_SIM;
+  private sgReseed = false;
   private sgGlowTex!: THREE.DataTexture;
   private sgGlowMesh!: THREE.Mesh;
   private sgGlowMat!: THREE.ShaderMaterial;
-  private sgGlowBytes = new Uint8Array(SG_GN * SG_GN);
-  private sgGlowBlur = new Float32Array(SG_GN * SG_GN);
+  private sgGlowBytes = new Uint8Array(GLOW_N * GLOW_N);
+  private sgGlowDens = new Float32Array(GLOW_N * GLOW_N);
+  private sgGlowBlur = new Float32Array(GLOW_N * GLOW_N);
   private telegrapher = new TelegrapherField(2.0, new THREE.Color(0x9ee0ff));
   private manyPasts = new ManyPasts(new THREE.Color(0x9b8dff), 2.5);
   // Supernova flare pool — when a massive star dies it spawns one of
@@ -445,22 +452,23 @@ export class GalaxyRegime extends Regime {
     this.spiralMesh.rotation.x = -Math.PI / 2;
     this.scene.add(this.spiralMesh);
 
-    // Self-gravity density glow: the live CIC mass grid (48²) rendered as a
-    // soft additive disk. Blurred + linearly filtered it reads as a continuous
-    // luminous medium; tinted hot in the core → cool at the rim like the
-    // painted disk, but its structure (bar, arms, lopsidedness) is the REAL
-    // evolving mass distribution, not artwork. Visible only in SG mode.
-    this.sgGlowTex = new THREE.DataTexture(this.sgGlowBytes, SG_GN, SG_GN, THREE.RedFormat, THREE.UnsignedByteType);
+    // Self-gravity starlight: the live star distribution, binned on a fine
+    // grid and smoothed, drawn as unresolved light under the star points. Its
+    // structure (bar, arms, lopsidedness) is the REAL evolving mass
+    // distribution, not artwork. The colour ramp is decorative: dense inner
+    // regions read as warm old-population light, thinner arms as cooler blue.
+    this.sgGlowTex = new THREE.DataTexture(this.sgGlowBytes, GLOW_N, GLOW_N, THREE.RedFormat, THREE.UnsignedByteType);
     this.sgGlowTex.magFilter = THREE.LinearFilter;
     this.sgGlowTex.minFilter = THREE.LinearFilter;
     this.sgGlowMat = new THREE.ShaderMaterial({
       transparent: true, depthWrite: false, blending: THREE.AdditiveBlending,
       uniforms: {
         dens:      { value: this.sgGlowTex },
-        coreColor: { value: new THREE.Color('#fff2da') },
-        midColor:  { value: new THREE.Color('#ffc890') },
-        edgeColor: { value: new THREE.Color('#88b8ff') },
+        coreColor: { value: new THREE.Color('#fff0d2') },
+        midColor:  { value: new THREE.Color('#ffd9a6') },
+        edgeColor: { value: new THREE.Color('#8fb4ff') },
         alphaGlobal: { value: 1.0 },
+        texel: { value: 1 / GLOW_N },
       },
       vertexShader: `
         varying vec2 vUv;
@@ -472,21 +480,24 @@ export class GalaxyRegime extends Regime {
       fragmentShader: `
         uniform sampler2D dens;
         uniform vec3 coreColor, midColor, edgeColor;
-        uniform float alphaGlobal;
+        uniform float alphaGlobal, texel;
         varying vec2 vUv;
         void main() {
-          float d = texture2D(dens, vUv).r;   // already tone-mapped CPU-side
-          float b = d * (0.55 + 0.45 * d);    // gentle gamma for depth
+          // 5-tap tent so individual texels never show
+          float d = 0.36 * texture2D(dens, vUv).r
+                  + 0.16 * (texture2D(dens, vUv + vec2(texel, 0.0)).r + texture2D(dens, vUv - vec2(texel, 0.0)).r
+                          + texture2D(dens, vUv + vec2(0.0, texel)).r + texture2D(dens, vUv - vec2(0.0, texel)).r);
           float r01 = length(vUv - 0.5) * 2.0;
-          // The bulge saturates the grid and the star points + BH already
-          // blaze there — attenuate the glow's core so the mid-disk arms
-          // and bar carry the light instead of one blown-white oval.
-          b *= mix(0.22, 1.0, smoothstep(0.04, 0.30, r01));
-          vec3 col = mix(coreColor, midColor, smoothstep(0.06, 0.35, r01));
-          col = mix(col, edgeColor, smoothstep(0.35, 0.85, r01));
-          // Fade hard at the plane edge so the quad never shows.
+          // Brightness rises faster than density at the faint end, so the
+          // outskirts fall to black instead of forming a flat plate.
+          float b = d * sqrt(d) * (1.7 - 0.7 * d);
+          // The star points and the black hole already blaze at the very
+          // centre; hold the glow back there.
+          b *= mix(0.45, 1.0, smoothstep(0.02, 0.16, r01));
+          vec3 col = mix(edgeColor, midColor, smoothstep(0.06, 0.42, d));
+          col = mix(col, coreColor, smoothstep(0.45, 0.9, d));
           float edge = 1.0 - smoothstep(0.85, 1.0, r01);
-          gl_FragColor = vec4(col, b * edge * 0.75 * alphaGlobal);
+          gl_FragColor = vec4(col, b * edge * 0.85 * alphaGlobal);
         }
       `
     });
@@ -861,7 +872,7 @@ export class GalaxyRegime extends Regime {
     const bulgeEnc = (r * r * r) / Math.pow(r * r + rc * rc, 1.5);  // Plummer, 0 → 1
     const Menc    = Mtot * (fBulge * bulgeEnc + (1 - fBulge) * diskEnc);
     const gBar    = G_SIM * Menc / Math.max(r * r, 1e-3);
-    const y       = gBar / A0_SIM;
+    const y       = gBar / this.a0Eff;
     const gObs    = nuRAR(y) * gBar;
     return Math.sqrt(gObs * Math.max(r, 0.1));
   }
@@ -976,10 +987,33 @@ export class GalaxyRegime extends Regime {
     for (let i = 0; i < stars.length; i++) {
       const s = stars[i];
       if (s.state === 'absorbed') { this.sgAx[i] = 0; this.sgAz[i] = 0; continue; }
+      const X = s.body.pos[0] - cx, Z = s.body.pos[2] - cz;
       const [gx, gz] = this.sgNewton(s.body.pos[0], s.body.pos[2], cx, cz);
-      const gN = Math.hypot(gx, gz) + 1e-30, b = nuRAR(gN / A0_SIM);
-      this.sgAx[i] = b * gx; this.sgAz[i] = b * gz;
+      const [ex, ez] = this.sgExcess(gx, gz, X, Z);
+      this.sgAx[i] = gx + ex; this.sgAz[i] = gz + ez;
     }
+  }
+
+  // The carrier's response to the baryonic field (paper §15, "direction-
+  // stiffness completion for resolved disks"). The excess flux is
+  //   J_⊥ = n_B(x̃) (ê·∇Φ_b) ê,   x̃ = (|ê·∇Φ_b| / a₀)^{1/2},   n_B = 1/(e^x − 1),
+  // with ê a stiff, near-radial director: its coherence length (≈ 6 kpc in
+  // the Milky Way) is far larger than the disk's thickness or an arm's
+  // width, so it cannot follow local structure. Here ê is the radial unit
+  // vector from the galaxy's centre, and the in-plane excess is taken as J_⊥
+  // itself. That is exact for an axisymmetric disk and matches the paper's
+  // full Poisson solve to ~0.01 dex on real rotation curves.
+  //
+  // What this changes versus boosting the whole vector by ν(|g|): the
+  // tangential pull of a bar or an arm stays Newtonian. The local form
+  // amplified exactly those torques by ν > 1 in the outer disk, which is
+  // what flung arms outward and inflated the disk.
+  private sgExcess(gx: number, gz: number, X: number, Z: number): [number, number] {
+    const r = Math.sqrt(X * X + Z * Z) + 1e-9;
+    const gR = (gx * X + gz * Z) / r;                       // radial component (negative = inward)
+    const nB = nuRAR(Math.abs(gR) / this.a0Eff) - 1;        // ν = 1 + n_B
+    const k = nB * gR / r;
+    return [k * X, k * Z];
   }
 
   // (Re)seed a warm, Q-stable exponential disk around the SMBH and prime accel.
@@ -1005,8 +1039,8 @@ export class GalaxyRegime extends Regime {
     for (const s of this.stars) {
       const X = s.body.pos[0] - cx, Z = s.body.pos[2] - cz, r = Math.hypot(X, Z);
       const [gx, gz] = this.sgNewton(s.body.pos[0], s.body.pos[2], cx, cz);
-      const gN = Math.hypot(gx, gz) + 1e-30, b = nuRAR(gN / A0_SIM);
-      const gr = -(b * gx * X + b * gz * Z) / Math.max(r, 1e-3);
+      const [ex, ez] = this.sgExcess(gx, gz, X, Z);
+      const gr = -((gx + ex) * X + (gz + ez) * Z) / Math.max(r, 1e-3);
       const bn = Math.min(NB - 1, (r / R_GAL * NB) | 0); if (gr > 0) { vcb[bn] += Math.sqrt(gr * r); cnt[bn]++; }
     }
     for (let bn = 0; bn < NB; bn++) vcb[bn] = cnt[bn] > 0 ? vcb[bn] / cnt[bn] : (bn > 0 ? vcb[bn - 1] : 0);
@@ -1017,7 +1051,7 @@ export class GalaxyRegime extends Regime {
       const v = vcb[Math.min(NB - 1, (r / R_GAL * NB) | 0)], O = v / Math.max(r, 1e-3), k = Math.SQRT2 * O;
       const Sig = S0 * Math.exp(-r / this.sgRd);
       const gbar = G_SIM * (this.sgBhMass + this.sgDiskMass * (1 - (1 + r / this.sgRd) * Math.exp(-r / this.sgRd))) / Math.max(r * r, 1e-3);
-      let sR = Q * 3.36 * G_SIM * nuRAR(gbar / A0_SIM) * Sig / Math.max(k, 1e-3);
+      let sR = Q * 3.36 * G_SIM * nuRAR(gbar / this.a0Eff) * Sig / Math.max(k, 1e-3);
       // Epicyclic setup is invalid inside ~0.7 Rd (Springel/makedisk floor the
       // centre for the same reason): cap the central dispersion harder and
       // floor the mean rotation so inner stars orbit instead of raining in.
@@ -1036,25 +1070,38 @@ export class GalaxyRegime extends Regime {
     this.sgPrevCx = cx; this.sgPrevCy = cy; this.sgPrevCz = cz;
   }
 
-  // Refresh the density-glow texture from the live CIC mass grid: one
-  // separable 3-tap blur (visual smoothing only — forces are untouched),
-  // then a soft exponential tone-map into bytes. ~7k ops; negligible.
-  private sgRefreshGlow() {
-    const N = SG_GN, src = this.sgDens, tmp = this.sgGlowBlur, out = this.sgGlowBytes;
-    for (let j = 0; j < N; j++) {
-      const r = j * N;
-      for (let i = 0; i < N; i++) {
-        const a = src[r + (i > 0 ? i - 1 : i)], b = src[r + i], c = src[r + (i < N - 1 ? i + 1 : i)];
-        tmp[r + i] = (a + b + c) / 3;
+  // Refresh the starlight texture: bin the stars (CIC) on the fine glow
+  // grid, smooth with two separable [1 2 1] passes (visual only — forces are
+  // untouched), then tone-map into bytes. ~50k ops per frame.
+  private sgRefreshGlow(cx: number, cz: number) {
+    const N = GLOW_N, span = this.sgSpan(), inv = N / (2 * span);
+    const ox = cx - span, oz = cz - span;
+    const src = this.sgGlowDens, tmp = this.sgGlowBlur, out = this.sgGlowBytes;
+    src.fill(0);
+    for (const s of this.stars) {
+      if (s.state === 'absorbed') continue;
+      const fx = (s.body.pos[0] - ox) * inv - 0.5, fz = (s.body.pos[2] - oz) * inv - 0.5;
+      const i0 = Math.floor(fx), j0 = Math.floor(fz);
+      if (i0 < 0 || j0 < 0 || i0 >= N - 1 || j0 >= N - 1) continue;
+      const tx = fx - i0, tz = fz - j0, k = j0 * N + i0;
+      src[k] += (1 - tx) * (1 - tz); src[k + 1] += tx * (1 - tz);
+      src[k + N] += (1 - tx) * tz;   src[k + N + 1] += tx * tz;
+    }
+    for (let pass = 0; pass < 2; pass++) {
+      for (let j = 0; j < N; j++) {
+        const r = j * N;
+        for (let i = 0; i < N; i++) {
+          tmp[r + i] = 0.25 * src[r + (i > 0 ? i - 1 : i)] + 0.5 * src[r + i] + 0.25 * src[r + (i < N - 1 ? i + 1 : i)];
+        }
+      }
+      for (let j = 0; j < N; j++) {
+        const up = (j > 0 ? j - 1 : j) * N, mid = j * N, dn = (j < N - 1 ? j + 1 : j) * N;
+        for (let i = 0; i < N; i++) src[mid + i] = 0.25 * tmp[up + i] + 0.5 * tmp[mid + i] + 0.25 * tmp[dn + i];
       }
     }
-    for (let j = 0; j < N; j++) {
-      for (let i = 0; i < N; i++) {
-        const a = tmp[(j > 0 ? j - 1 : j) * N + i], b = tmp[j * N + i], c = tmp[(j < N - 1 ? j + 1 : j) * N + i];
-        const m = (a + b + c) / 3;
-        out[j * N + i] = Math.min(255, 255 * (1 - Math.exp(-0.38 * m))) | 0;
-      }
-    }
+    // Normalise to the star count so the look does not depend on N_STARS.
+    const k = 0.10 * (16000 / N_STARS);
+    for (let q = 0; q < N * N; q++) out[q] = (255 * (1 - Math.exp(-k * src[q]))) | 0;
     this.sgGlowTex.needsUpdate = true;
   }
 
@@ -1155,6 +1202,16 @@ export class GalaxyRegime extends Regime {
     // through 1 Gyr, fully visible by ~3 Gyr. Past that, slow brightening
     // tracks SMBH growth.
     const tG = ctx.time;          // Gyr
+    // Epoch-dependent acceleration scale, a₀(z) = ε c H(z). Held at its value
+    // at z = 8 before galaxies exist. A jump of more than ~15 % in one frame
+    // is a time scrub, not evolution: the disk is then re-seeded in
+    // equilibrium at the new epoch instead of being left to ring.
+    {
+      const aNow = Math.max(scaleFactor(tG), 1 / (1 + checkpoints.Z_GALAXIES));
+      const a0New = A0_SIM * hubbleRatio(aNow);
+      if (this.sgActive && Math.abs(Math.log(a0New / this.a0Eff)) > 0.15) this.sgReseed = true;
+      this.a0Eff = a0New;
+    }
     const galaxyAlpha = Math.min(1, Math.max(0, (tG - 0.1) / 2.0));
     this.spiralMat.uniforms.alphaGlobal.value = galaxyAlpha;
     this.spiralMat.uniforms.detail.value = ctx.diskDetailOn ? 1 : 0;
@@ -1276,10 +1333,16 @@ export class GalaxyRegime extends Regime {
     if (ctx.selfGravityOn) {
       // Experimental: real PM self-gravity + RAR. (Re)seed on enable.
       if (!this.sgActive) {
-        if (this.sgSaved) this.sgRestore(cx, cy, cz);   // resume the evolved disk
-        else this.sgInit(cx, cy, cz);                    // first enable: seed fresh
+        const sameEpoch = Math.abs(Math.log(this.a0Eff / this.a0AtInit)) < 0.15;
+        if (this.sgSaved && sameEpoch) this.sgRestore(cx, cy, cz);   // resume the evolved disk
+        else this.sgInit(cx, cy, cz);                                 // first enable / new epoch: seed fresh
         this.sgActive = true;
+        this.sgReseed = false;
+      } else if (this.sgReseed) {
+        this.sgInit(cx, cy, cz);
+        this.sgReseed = false;
       }
+      this.a0AtInit = this.a0Eff;
       this.sgUpdate(visDt, cx, cy, cz);
     } else {
     if (this.sgActive) { this.sgSnapshot(); this.sgActive = false; }
@@ -1334,7 +1397,7 @@ export class GalaxyRegime extends Regime {
     const glowOn = ctx.selfGravityOn && this.sgActive && ctx.diskOn && galaxyAlpha > 0.01;
     this.sgGlowMesh.visible = glowOn;
     if (glowOn) {
-      this.sgRefreshGlow();
+      this.sgRefreshGlow(cx, cz);
       this.sgGlowMesh.position.set(cx, cy - 0.15, cz);
       (this.sgGlowMat.uniforms.alphaGlobal as { value: number }).value = galaxyAlpha;
     }

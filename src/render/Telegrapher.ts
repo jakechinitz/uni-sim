@@ -37,7 +37,7 @@ export class TelegrapherField {
   emit(center: THREE.Vector3, maxR: number, amp = 1, glowTex?: THREE.Texture) {
     // Thin ring (one segment, low subdivision) — reads as a wavefront,
     // not a screen-filling sphere. Faces nearest plane to camera.
-    const geom = new THREE.RingGeometry(0.95, 1.0, 64, 1);
+    const geom = new THREE.RingGeometry(0.988, 1.0, 96, 1);
     const shellMat = new THREE.MeshBasicMaterial({
       color: this.color, transparent: true, opacity: 0,
       side: THREE.DoubleSide, depthWrite: false,
@@ -75,7 +75,7 @@ export class TelegrapherField {
       const frac = r / w.maxR;
       // Ring fades as it expands so the wavefront looks like it disperses
       const env  = Math.max(0, 1 - frac);
-      const opShell = 0.55 * w.amp * env * env;
+      const opShell = 0.30 * w.amp * env * env * env;
       w.shellMat.opacity = opShell;
       w.mesh.scale.setScalar(Math.max(1e-6, r));
 

@@ -96,6 +96,28 @@ export function accelOnRAR(
   return [ax, ay, az];
 }
 
+// Plain Newtonian pairwise acceleration (softened like the RAR version).
+// Used inside a planetary system: the paper's response belongs to the
+// galaxy's carrier, and a star or planet inside it carries no transverse
+// halo of its own (§15–§16: Q₂^{⊙,⊥} = 0, PPN γ = β = 1).
+export function accelOnNewton(
+  i: number,
+  bodies: Body[],
+  gScale: number
+): [number, number, number] {
+  const bi = bodies[i];
+  let ax = 0, ay = 0, az = 0;
+  for (let j = 0; j < bodies.length; j++) {
+    if (j === i) continue;
+    const bj = bodies[j];
+    const rx = bi.pos[0] - bj.pos[0], ry = bi.pos[1] - bj.pos[1], rz = bi.pos[2] - bj.pos[2];
+    const r2 = rx * rx + ry * ry + rz * rz + SOFT2;
+    const k = -gScale * bj.mass / (r2 * Math.sqrt(r2));
+    ax += k * rx; ay += k * ry; az += k * rz;
+  }
+  return [ax, ay, az];
+}
+
 // --- Substrate q-field --------------------------------------------------
 
 export interface Defect {
