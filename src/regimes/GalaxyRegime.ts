@@ -15,6 +15,7 @@ import { TelegrapherField } from '../render/Telegrapher';
 import { ManyPasts } from '../render/ManyPasts';
 import { hawkingSolar, scrambling, formatSI } from '../core/Closure';
 import { M_SUN, T_UNIV } from '../util/units';
+import { FFT2D } from '../util/fft';
 import { a as scaleFactor, hubbleRatio, checkpoints } from '../core/Cosmology';
 import { imfSample, mainSeqLifetime, SUPERNOVA_MASS } from '../core/StellarLifecycle';
 
@@ -26,7 +27,7 @@ import { imfSample, mainSeqLifetime, SUPERNOVA_MASS } from '../core/StellarLifec
 // pointer movement. Each point still represents ~10⁷ real solar
 // systems (Milky Way has ~3×10¹¹ stars) — see scale-vs-reality note
 // in the README.
-const N_STARS = 16000;
+const N_STARS = 24000;
 // Density-wave (precessing-ellipse) spiral parameters. ARM_TWIST sets the
 // spiral pitch (major-axis orientation in radians per unit guiding radius →
 // a 2-arm trailing pattern). PATTERN_FRAC sets the rigid pattern speed as a
@@ -43,6 +44,7 @@ const SLOSH_DAMP = 0.25;
 // particle-mesh gravity + the paper's RAR forms a stable, confined MOND bar
 // (A2 → ~0.3 with ~98% of stars retained). Knobs trade structure↔stability.
 const SG_GN = 48;             // PM grid resolution (NxN)
+const SG_PAD = 128;           // zero-padded FFT size for the isolated convolution (≥ 2·SG_GN − 1)
 const GLOW_N = 128;           // resolution of the starlight (density-glow) texture
 const SG_DISK_MASS = 1500;    // disk self-gravity mass (sim units)
 const SG_BH_MASS = 80;        // light central mass (bar-favoring; SG-only)
@@ -177,16 +179,16 @@ export class GalaxyRegime extends Regime {
   private sgSaveZ = new Float64Array(N_STARS);
   private sgSaveVx = new Float64Array(N_STARS);
   private sgSaveVz = new Float64Array(N_STARS);
-  private sgKx: Float64Array | null = null;
-  private sgKz: Float64Array | null = null;
+  private sgKhatRe: Float64Array | null = null;
+  private sgKhatIm: Float64Array | null = null;
+  private sgFft = new FFT2D(SG_PAD);
+  private sgFftRe = new Float64Array(SG_PAD * SG_PAD);
+  private sgFftIm = new Float64Array(SG_PAD * SG_PAD);
   private sgDens = new Float32Array(SG_GN * SG_GN);
   private sgFx = new Float32Array(SG_GN * SG_GN);
   private sgFz = new Float32Array(SG_GN * SG_GN);
   private sgAx = new Float64Array(N_STARS);
   private sgAz = new Float64Array(N_STARS);
-  private sgOccI = new Int32Array(SG_GN * SG_GN);
-  private sgOccJ = new Int32Array(SG_GN * SG_GN);
-  private sgOccM = new Float64Array(SG_GN * SG_GN);
   private sgInitRrms = 1;
   private sgStats = { a2: 0, drift: 0, retained: 1, verdict: 'off' };
   // Live density-glow layer for self-gravity mode: the CIC mass grid rendered
@@ -196,6 +198,8 @@ export class GalaxyRegime extends Regime {
   private a0Eff = A0_SIM;
   private a0AtInit = A0_SIM;
   private sgReseed = false;
+  private sgStatTick = 0;
+  private sgGlowTick = 0;
   private sgGlowTex!: THREE.DataTexture;
   private sgGlowMesh!: THREE.Mesh;
   private sgGlowMat!: THREE.ShaderMaterial;
@@ -901,16 +905,20 @@ export class GalaxyRegime extends Regime {
   private sgSpan() { return R_GAL * 1.6; }
   private sgCell() { return 2 * this.sgSpan() / SG_GN; }
 
+  // Softened point-mass kernel on the padded grid, stored as the transform
+  // of K_x + i K_z (see sgField).
   private sgBuildKernel() {
-    const N = SG_GN, KW = 2 * N + 1, cell = this.sgCell(), eps = SG_EPS_CELLS * cell;
-    const Kx = new Float64Array(KW * KW), Kz = new Float64Array(KW * KW);
-    for (let dj = -N; dj <= N; dj++) for (let di = -N; di <= N; di++) {
+    const N = SG_GN, P = SG_PAD, cell = this.sgCell(), eps = SG_EPS_CELLS * cell;
+    const re = new Float64Array(P * P), im = new Float64Array(P * P);
+    for (let dj = -(N - 1); dj <= N - 1; dj++) for (let di = -(N - 1); di <= N - 1; di++) {
       const X = di * cell, Z = dj * cell, r2 = X * X + Z * Z + eps * eps;
       const inv = 1 / Math.sqrt(r2), inv3 = inv * inv * inv;
-      Kx[(dj + N) * KW + (di + N)] = -G_SIM * X * inv3;   // attractive
-      Kz[(dj + N) * KW + (di + N)] = -G_SIM * Z * inv3;
+      const q = ((dj + P) % P) * P + ((di + P) % P);
+      re[q] = -G_SIM * X * inv3;   // attractive
+      im[q] = -G_SIM * Z * inv3;
     }
-    this.sgKx = Kx; this.sgKz = Kz;
+    this.sgFft.run(re, im, false);
+    this.sgKhatRe = re; this.sgKhatIm = im;
   }
 
   // Deposit star mass (CIC) and convolve with the kernel → in-plane force field.
@@ -927,23 +935,22 @@ export class GalaxyRegime extends Regime {
       if (i0 >= 0 && i0 < N && j0 + 1 < N) dens[(j0 + 1) * N + i0] += m * (1 - tx) * tz;
       if (i0 + 1 < N && j0 + 1 < N) dens[(j0 + 1) * N + i0 + 1] += m * tx * tz;
     }
-    // Collect occupied source cells, then convolve over only those (the disk
-    // fills a fraction of the grid → big speedup vs. all cell-pairs).
-    const occI = this.sgOccI, occJ = this.sgOccJ, occM = this.sgOccM;
-    let nOcc = 0;
-    for (let k = 0; k < N * N; k++) { const d = dens[k]; if (d !== 0) { occI[nOcc] = k % N; occJ[nOcc] = (k / N) | 0; occM[nOcc] = d; nOcc++; } }
-    const Kx = this.sgKx!, Kz = this.sgKz!, KW = 2 * N + 1, Fx = this.sgFx, Fz = this.sgFz;
-    for (let cj = 0; cj < N; cj++) {
-      const crow = cj * N;
-      for (let ci = 0; ci < N; ci++) {
-        let sx = 0, sz = 0;
-        for (let o = 0; o < nOcc; o++) {
-          const ki = (cj - occJ[o] + N) * KW + (ci - occI[o] + N), mm = occM[o];
-          sx += mm * Kx[ki]; sz += mm * Kz[ki];
-        }
-        Fx[crow + ci] = sx; Fz[crow + ci] = sz;
-      }
+    // Convolve with the softened point-mass kernel by FFT. The density is
+    // zero-padded to SG_PAD² so the periodic transform reproduces the
+    // isolated (open-boundary) sum exactly; F_x and F_z come out of ONE
+    // inverse transform as the real and imaginary parts of F_x + i F_z.
+    const P = SG_PAD, re = this.sgFftRe, im = this.sgFftIm, kr = this.sgKhatRe!, ki = this.sgKhatIm!;
+    re.fill(0); im.fill(0);
+    for (let j = 0; j < N; j++) for (let i = 0; i < N; i++) re[j * P + i] = dens[j * N + i];
+    this.sgFft.run(re, im, false);
+    for (let q = 0; q < P * P; q++) {
+      const a = re[q], b = im[q];
+      re[q] = a * kr[q] - b * ki[q];
+      im[q] = a * ki[q] + b * kr[q];
     }
+    this.sgFft.run(re, im, true);
+    const Fx = this.sgFx, Fz = this.sgFz;
+    for (let j = 0; j < N; j++) for (let i = 0; i < N; i++) { Fx[j * N + i] = re[j * P + i]; Fz[j * N + i] = im[j * P + i]; }
   }
 
   // Bilinear (CIC) sample of the force field at world (x,z).
@@ -980,17 +987,43 @@ export class GalaxyRegime extends Regime {
     return [gx, gz];
   }
 
-  // RAR-boosted acceleration (disk field + light central point), stored per star.
+  // Total acceleration per star: Newtonian (mesh + softened central mass, with
+  // the analytic far-field blend of sgNewton) plus the carrier's response
+  // (sgExcess). This is the hot loop, so the three helpers are inlined here
+  // with no per-star allocation; it must stay identical to
+  // sgNewton() + sgExcess(), which the initial conditions use.
   private sgComputeAccel(cx: number, cz: number) {
     this.sgField(cx, cz);
-    const stars = this.stars;
+    const stars = this.stars, N = SG_GN, span = this.sgSpan(), inv = 1 / this.sgCell();
+    const ox = cx - span, oz = cz - span, Fx = this.sgFx, Fz = this.sgFz;
+    const w0 = 0.78 * span, a0 = this.a0Eff, GMbh = G_SIM * this.sgBhMass, Rd = this.sgRd, Md = this.sgDiskMass;
+    const ax = this.sgAx, az = this.sgAz, top = N - 1;
     for (let i = 0; i < stars.length; i++) {
       const s = stars[i];
-      if (s.state === 'absorbed') { this.sgAx[i] = 0; this.sgAz[i] = 0; continue; }
-      const X = s.body.pos[0] - cx, Z = s.body.pos[2] - cz;
-      const [gx, gz] = this.sgNewton(s.body.pos[0], s.body.pos[2], cx, cz);
-      const [ex, ez] = this.sgExcess(gx, gz, X, Z);
-      this.sgAx[i] = gx + ex; this.sgAz[i] = gz + ez;
+      if (s.state === 'absorbed') { ax[i] = 0; az[i] = 0; continue; }
+      const p = s.body.pos, X = p[0] - cx, Z = p[2] - cz;
+      // bilinear sample of the mesh field (clamped at the grid edge)
+      const fx = (p[0] - ox) * inv, fz = (p[2] - oz) * inv;
+      const i0 = Math.floor(fx), j0 = Math.floor(fz), tx = fx - i0, tz = fz - j0;
+      const ia = i0 < 0 ? 0 : i0 > top ? top : i0, ib = i0 + 1 < 0 ? 0 : i0 + 1 > top ? top : i0 + 1;
+      const ja = (j0 < 0 ? 0 : j0 > top ? top : j0) * N, jb = (j0 + 1 < 0 ? 0 : j0 + 1 > top ? top : j0 + 1) * N;
+      let gx = (Fx[ja + ia] * (1 - tx) + Fx[ja + ib] * tx) * (1 - tz) + (Fx[jb + ia] * (1 - tx) + Fx[jb + ib] * tx) * tz;
+      let gz = (Fz[ja + ia] * (1 - tx) + Fz[ja + ib] * tx) * (1 - tz) + (Fz[jb + ia] * (1 - tx) + Fz[jb + ib] * tx) * tz;
+      // softened central mass
+      const rr = X * X + Z * Z, q = 1 / Math.sqrt(rr + SG_BH_SOFT2), fb = GMbh * q * q * q;
+      gx -= fb * X; gz -= fb * Z;
+      const r = Math.sqrt(rr) + 1e-6;
+      if (r > w0) {                       // blend to the analytic enclosed-mass pull near the grid edge
+        const x1 = r / Rd, gFar = G_SIM * (this.sgBhMass + Md * (1 - (1 + x1) * Math.exp(-x1))) / (r * r);
+        const w = Math.min(1, (r - w0) / (span - w0));
+        gx = (1 - w) * gx - w * gFar * X / r;
+        gz = (1 - w) * gz - w * gFar * Z / r;
+      }
+      // response on the radial component: ν − 1 = n_B = 1/(e^{√y} − 1)
+      const gR = (gx * X + gz * Z) / r;
+      const y = (gR < 0 ? -gR : gR) / a0;
+      const k = (nuRAR(y) - 1) * gR / r;
+      ax[i] = gx + k * X; az[i] = gz + k * Z;
     }
   }
 
@@ -1019,7 +1052,7 @@ export class GalaxyRegime extends Regime {
   // (Re)seed a warm, Q-stable exponential disk around the SMBH and prime accel.
   private sgInit(cx: number, cy: number, cz: number) {
     const Q = this.sgQv;
-    if (!this.sgKx) this.sgBuildKernel();
+    if (!this.sgKhatRe) this.sgBuildKernel();
     for (const s of this.stars) {
       // Sample p(r) ∝ r·e^(−r/Rd) — the TRUE 2D exponential disk. (The old
       // −Rd·ln(u) missed the area factor r and packed ~28% of all stars
@@ -1157,7 +1190,8 @@ export class GalaxyRegime extends Regime {
         s.body.vel[0] += 0.5 * dt * this.sgAx[i]; s.body.vel[2] += 0.5 * dt * this.sgAz[i];
       }
     }
-    // health metrics
+    // health metrics (trig per star — refreshed a few times a second, not every frame)
+    if ((this.sgStatTick++ % 20) !== 0) return;
     let c2 = 0, s2 = 0, re = 0, n = 0, within = 0;
     for (const s of stars) {
       if (s.state === 'absorbed') continue;
@@ -1352,6 +1386,13 @@ export class GalaxyRegime extends Regime {
     const rCo = 0.55 * R_GAL;                                   // co-rotation radius
     const patternOmega = (this.circularSpeed(rCo) / rCo) * PATTERN_FRAC;
     const patternRot = patternOmega * tOrb;
+    // Tidal radii² of the black holes, hoisted out of the per-star loop.
+    const nBh = this.bhs.length, bhXYZR = new Float64Array(nBh * 4);
+    for (let b = 0; b < nBh; b++) {
+      const bh = this.bhs[b];
+      bhXYZR[b * 4] = bh.body.pos[0]; bhXYZR[b * 4 + 1] = bh.body.pos[1]; bhXYZR[b * 4 + 2] = bh.body.pos[2];
+      bhXYZR[b * 4 + 3] = TIDAL_K * TIDAL_K * bh.mass;
+    }
     for (const star of this.stars) {
       if (star.state === 'absorbed') continue;
       const phi = this.armTwist * star.gr + patternRot;   // arm (major-axis) angle
@@ -1373,15 +1414,13 @@ export class GalaxyRegime extends Regime {
       star.body.pos[0] = px;
       star.body.pos[1] = py;
       star.body.pos[2] = pz;
-      for (const bh of this.bhs) {
-        const rx = px - bh.body.pos[0];
-        const ry = py - bh.body.pos[1];
-        const rz = pz - bh.body.pos[2];
-        const rT = TIDAL_K * Math.sqrt(bh.mass);
-        if (rx * rx + ry * ry + rz * rz < rT * rT) {
+      for (let b = 0; b < nBh; b++) {
+        const rx = px - bhXYZR[b * 4], ry = py - bhXYZR[b * 4 + 1], rz = pz - bhXYZR[b * 4 + 2];
+        if (rx * rx + ry * ry + rz * rz < bhXYZR[b * 4 + 3]) {
           star.state = 'absorbed';
           star.deathT = tG;
-          (bh.mesh as any).feedPulse = ((bh.mesh as any).feedPulse ?? 0) + 0.6;
+          const mesh = this.bhs[b].mesh as any;
+          mesh.feedPulse = (mesh.feedPulse ?? 0) + 0.6;
           break;
         }
       }
@@ -1397,7 +1436,7 @@ export class GalaxyRegime extends Regime {
     const glowOn = ctx.selfGravityOn && this.sgActive && ctx.diskOn && galaxyAlpha > 0.01;
     this.sgGlowMesh.visible = glowOn;
     if (glowOn) {
-      this.sgRefreshGlow(cx, cz);
+      if ((this.sgGlowTick++ & 1) === 0) this.sgRefreshGlow(cx, cz);   // every other frame is plenty for unresolved light
       this.sgGlowMesh.position.set(cx, cy - 0.15, cz);
       (this.sgGlowMat.uniforms.alphaGlobal as { value: number }).value = galaxyAlpha;
     }

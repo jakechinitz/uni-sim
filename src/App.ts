@@ -546,6 +546,7 @@ export class App {
       this.regimes.pumpFocus();
       this.regimes.setZoom(this.state.zoom);
 
+      const tUpd = performance.now();
       this.regimes.update({
         seed: this.state.seed,
         time: tGyr,
@@ -561,6 +562,9 @@ export class App {
         quality,
         focus: this.regimes.focus
       }, dtSim);
+      // Rolling CPU cost of the physics/update step, for profiling (ms).
+      this.updateMs += 0.05 * (performance.now() - tUpd - this.updateMs);
+      (window as unknown as { __unisimUpdateMs?: number }).__unisimUpdateMs = this.updateMs;
 
       if (this.controls) {
         this.controls.update();
@@ -621,4 +625,5 @@ export class App {
     }
   };
   private _autosaveAccum = 0;
+  private updateMs = 0;
 }

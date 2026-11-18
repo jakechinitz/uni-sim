@@ -21,6 +21,8 @@
 // Gaussian random field: x = q + D(a) ψ(q), ψ̂ = i k δ̂ / k², with D the linear
 // growth factor on the same background (D(1) = 1).
 
+import { FFT1D } from '../util/fft';
+
 export interface PMBackground {
   /** Hubble rate H(a) in 1/Gyr. */
   H(a: number): number;
@@ -54,54 +56,7 @@ export interface PMConfig {
 }
 
 // ---------------------------------------------------------------- FFT ----
-// In-place radix-2 complex FFT on parallel re/im arrays, plus a 3-D wrapper.
-class FFT1D {
-  private rev: Uint32Array;
-  private cos: Float64Array;
-  private sin: Float64Array;
-  constructor(readonly n: number) {
-    const bits = Math.round(Math.log2(n));
-    if (1 << bits !== n) throw new Error('FFT size must be a power of two');
-    this.rev = new Uint32Array(n);
-    for (let i = 0; i < n; i++) {
-      let r = 0;
-      for (let b = 0; b < bits; b++) if (i & (1 << b)) r |= 1 << (bits - 1 - b);
-      this.rev[i] = r;
-    }
-    this.cos = new Float64Array(n / 2);
-    this.sin = new Float64Array(n / 2);
-    for (let i = 0; i < n / 2; i++) {
-      this.cos[i] = Math.cos((2 * Math.PI * i) / n);
-      this.sin[i] = Math.sin((2 * Math.PI * i) / n);
-    }
-  }
-  /** Transform one line held in (re, im). inverse=true uses e^{+iθ}; unnormalised. */
-  run(re: Float64Array, im: Float64Array, inverse: boolean): void {
-    const n = this.n, rev = this.rev, cs = this.cos, sn = this.sin;
-    for (let i = 0; i < n; i++) {
-      const j = rev[i];
-      if (j > i) {
-        let t = re[i]; re[i] = re[j]; re[j] = t;
-        t = im[i]; im[i] = im[j]; im[j] = t;
-      }
-    }
-    const sgn = inverse ? 1 : -1;
-    for (let size = 2; size <= n; size <<= 1) {
-      const half = size >> 1, step = n / size;
-      for (let s = 0; s < n; s += size) {
-        for (let k = 0, t = 0; k < half; k++, t += step) {
-          const wr = cs[t], wi = sgn * sn[t];
-          const a = s + k, b = a + half;
-          const xr = re[b] * wr - im[b] * wi;
-          const xi = re[b] * wi + im[b] * wr;
-          re[b] = re[a] - xr; im[b] = im[a] - xi;
-          re[a] += xr; im[a] += xi;
-        }
-      }
-    }
-  }
-}
-
+// 3-D wrapper around the shared radix-2 transform.
 class FFT3D {
   private f: FFT1D;
   private lr: Float64Array;
