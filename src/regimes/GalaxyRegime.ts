@@ -1,6 +1,6 @@
-// GALAXY: spiral disk + central BH. Stars ride a density-wave (precessing-
-// ellipse) spiral — the arms rotate rigidly while stars stream differentially
-// at the paper's flat RAR rotation curve (§15 — no dark matter needed). BHs are
+// GALAXY: a self-gravitating stellar disk + central BH. 24,000 stars feel each
+// other through a particle-mesh solve plus the paper's response law, applied
+// by its disk rule (§15); bars and arms that appear are emergent. BHs are
 // draggable; stars are click-to-focus.
 
 import * as THREE from 'three';
@@ -19,27 +19,11 @@ import { FFT2D } from '../util/fft';
 import { a as scaleFactor, hubbleRatio, checkpoints } from '../core/Cosmology';
 import { imfSample, mainSeqLifetime, SUPERNOVA_MASS } from '../core/StellarLifecycle';
 
-// 8,000 stars across an 18-unit disk — enough for a real spiral-galaxy
-// brightness wash without overloading the per-frame star integration
-// (~ N × 5 BHs × 2 substeps = 80k force ops/frame) or the hover raycast
-// (linear in N at every pointer event, now also throttled to 30 Hz).
-// Tried 12,000 first; visually beautiful but caused frame hitches on
-// pointer movement. Each point still represents ~10⁷ real solar
-// systems (Milky Way has ~3×10¹¹ stars) — see scale-vs-reality note
-// in the README.
+// Stars in the disk. Gravity is an FFT particle-mesh solve, so cost is linear
+// in this count. Each point still stands for ~10⁷ real solar systems (the
+// Milky Way has ~3×10¹¹ stars).
 const N_STARS = 24000;
-// Density-wave (precessing-ellipse) spiral parameters. ARM_TWIST sets the
-// spiral pitch (major-axis orientation in radians per unit guiding radius →
-// a 2-arm trailing pattern). PATTERN_FRAC sets the rigid pattern speed as a
-// fraction of the co-rotation orbital rate. ARM_ECC_MAX caps the ellipse
-// eccentricity (arm sharpness) at the disk edge. See GalaxyRegime.update().
-const ARM_TWIST = 0.32;
-const PATTERN_FRAC = 0.85;
-const ARM_ECC_MAX = 0.42;
-// Damping ratio for the transient disk slosh when the SMBH is dragged. ~0.25 is
-// underdamped — a couple of visible oscillations, then it settles.
-const SLOSH_DAMP = 0.25;
-// ---- Experimental self-gravity (default OFF, toggle in the SG debug panel) ----
+// ---- Self-gravitating disk ----
 // Verified in /tmp prototypes: a warm Q-stable exponential disk under
 // particle-mesh gravity + the paper's RAR forms a stable, confined MOND bar
 // (A2 → ~0.3 with ~98% of stars retained). Knobs trade structure↔stability.
@@ -107,19 +91,7 @@ interface Star {
   state: 'main' | 'giant' | 'dead' | 'absorbed';
   deathT: number;      // cosmic Gyr when it died/was eaten (Infinity if alive)
   spawnedBH: boolean;  // true once we've added a stellar BH from a supernova
-  // Density-wave (precessing-ellipse) orbit — drives the star analytically in
-  // update() instead of free integration, so the spiral can't wind or disperse.
-  gr: number;          // guiding radius (ellipse semi-major axis)
-  ecc: number;         // ellipse eccentricity (sets local arm sharpness)
-  omega: number;       // streaming rate Ω(r)=v(r)/r around the ellipse
-  phase0: number;      // phase around the ellipse at t=0
   yOff: number;        // vertical disk offset (held constant)
-  // Transient slosh: a damped epicyclic perturbation off the equilibrium orbit.
-  // Kicked when the SMBH is dragged, then decays back to zero (bounded, so no
-  // winding/dispersal). Frequency ∝ omega, so inner stars re-settle fast and
-  // outer stars lag → the disk warps and recovers like a real perturbed disk.
-  qx: number; qy: number; qz: number;   // perturbation offset
-  ux: number; uy: number; uz: number;   // perturbation velocity
 }
 
 
@@ -131,8 +103,6 @@ export class GalaxyRegime extends Regime {
   private posAttr: THREE.BufferAttribute;
   private colAttr: THREE.BufferAttribute;
   private bhs: BHView[] = [];
-  private spiralMesh: THREE.Mesh;
-  private spiralMat: THREE.ShaderMaterial;
   private haloMesh: THREE.Sprite;
   private fieldLines: THREE.LineSegments;
   private flMaterial: THREE.LineBasicMaterial;
@@ -155,30 +125,14 @@ export class GalaxyRegime extends Regime {
   // based on the cosmic-time gap since last update.
   private silentCatchup = true;
   private lastSeenCosmicT = -1;
-  // Central mass the per-star rotation rates were last computed for; when it
-  // changes (a merger), every star's Ω(r) is refreshed so the curve updates.
-  private lastRotMass = -1;
   // Per-galaxy variation (seeded in the constructor) so no two look the same.
-  private armTwist = ARM_TWIST;     // density-wave spiral pitch
-  private armEcc = ARM_ECC_MAX;     // density-wave arm sharpness
   private sgQv = SG_Q;              // self-gravity Toomre-Q
   private sgDiskMass = SG_DISK_MASS;
   private sgBhMass = SG_BH_MASS;
   private sgRd = SG_RD;
-  // Previous SMBH position — its per-frame motion drives the transient slosh.
-  private prevCx = 0; private prevCy = 0; private prevCz = 0;
-  private centerInit = false;
-  // Experimental self-gravity (PM N-body) state.
+  // Self-gravity (PM N-body) state. sgActive = the disk has been seeded.
   private sgActive = false;
   private sgPrevCx = 0; private sgPrevCy = 0; private sgPrevCz = 0;  // for SMBH-drag follow
-  // Toggle continuity: when the user switches SG → painted, the evolved state
-  // (positions/velocities relative to the SMBH) is snapshotted; switching back
-  // RESUMES it instead of re-seeding, so a grown bar survives round-trips.
-  private sgSaved = false;
-  private sgSaveX = new Float64Array(N_STARS);
-  private sgSaveZ = new Float64Array(N_STARS);
-  private sgSaveVx = new Float64Array(N_STARS);
-  private sgSaveVz = new Float64Array(N_STARS);
   private sgKhatRe: Float64Array | null = null;
   private sgKhatIm: Float64Array | null = null;
   private sgFft = new FFT2D(SG_PAD);
@@ -191,9 +145,8 @@ export class GalaxyRegime extends Regime {
   private sgAz = new Float64Array(N_STARS);
   private sgInitRrms = 1;
   private sgStats = { a2: 0, drift: 0, retained: 1, verdict: 'off' };
-  // Live density-glow layer for self-gravity mode: the CIC mass grid rendered
-  // as a soft luminous disk, so the emergent galaxy reads as richly as the
-  // painted one — and honestly, since the glow IS the actual mass field.
+  // Starlight layer: the live star distribution rendered as a soft luminous
+  // disk. The glow IS the actual mass field.
   // a₀ at the current epoch: a₀(z) = ε c H(z) (paper §15), in sim units.
   private a0Eff = A0_SIM;
   private a0AtInit = A0_SIM;
@@ -225,8 +178,7 @@ export class GalaxyRegime extends Regime {
     // doesn't perturb the existing BH/disk seeding. Ranges stay near the
     // verified-stable values so every galaxy still reads as a galaxy.
     const vrng = mulberry32(hashStr(`galaxy-var|${seed}`));
-    this.armTwist = 0.20 + vrng() * 0.30;   // [0.20,0.50] spiral pitch (loose↔tight)
-    this.armEcc   = 0.30 + vrng() * 0.24;   // [0.30,0.54] arm sharpness
+    vrng(); vrng();   // two draws once used by the removed painted disk; kept so each galaxy's values below are unchanged
     this.sgQv       = 0.85 + vrng() * 0.25; // [0.85,1.10] bar strength (lower = stronger)
     this.sgDiskMass = 1300 + vrng() * 500;  // [1300,1800] disk self-gravity mass
     this.sgBhMass   = 55  + vrng() * 70;    // [55,125] central concentration
@@ -362,99 +314,6 @@ export class GalaxyRegime extends Regime {
     this.haloMesh.scale.setScalar(R_GAL * 3.8);
     this.scene.add(this.haloMesh);
 
-    // Spiral background disk shader. Three structural layers always on:
-    //   - exponential bulge concentrated near the centre
-    //   - exponential disk falloff in radius
-    //   - 2 main log-spiral arms + 2 weaker secondary arms
-    // Plus three "real galaxies have these but the paper doesn't" detail
-    // layers, gated by `detail` uniform (driven by the disk-detail UI
-    // toggle):
-    //   - dust lanes along the inner edge of each arm (offset spiral)
-    //   - pinkish HII star-forming knots along arm peaks
-    //   - knotty fBm clumping on the arms
-    // None of these affect dynamics; only the disk visual.
-    const spiralGeom = new THREE.CircleGeometry(R_GAL, 160);
-    this.spiralMat = new THREE.ShaderMaterial({
-      transparent: true,
-      blending: THREE.AdditiveBlending,
-      depthWrite: false,
-      uniforms: {
-        time:       { value: 0 },
-        twist:      { value: 4.4 },
-        coreColor:  { value: new THREE.Color('#fff4d0') },   // bulge: warm yellow-white
-        midColor:   { value: new THREE.Color('#ffc890') },   // mid-disk: warm
-        edgeColor:  { value: new THREE.Color('#88b8ff') },   // outer disk: cool young blue
-        hiiColor:   { value: new THREE.Color('#ff7090') },   // HII regions: pink
-        detail:     { value: 1 },                            // 0 = flat, 1 = textured
-        // Driven by cosmic time so the disk fades up as the galaxy assembles
-        alphaGlobal: { value: 1 }
-      },
-      vertexShader: /* glsl */`
-        varying vec2 vP;
-        void main(){
-          vP = position.xy;
-          gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
-        }
-      `,
-      fragmentShader: /* glsl */`
-        uniform float time, twist, alphaGlobal, detail;
-        uniform vec3  coreColor, midColor, edgeColor, hiiColor;
-        varying vec2 vP;
-
-        float hash(vec2 p){ p=fract(p*vec2(123.34,456.21)); p+=dot(p,p+34.345); return fract(p.x*p.y); }
-        float noise(vec2 p){
-          vec2 i=floor(p), f=fract(p);
-          vec2 u=f*f*(3.0-2.0*f);
-          return mix(mix(hash(i),hash(i+vec2(1,0)),u.x),
-                     mix(hash(i+vec2(0,1)),hash(i+vec2(1,1)),u.x), u.y);
-        }
-        float fbm(vec2 p){ float v=0., a=0.5; for(int i=0;i<4;i++){ v+=a*noise(p); p*=2.07; a*=0.5; } return v; }
-
-        void main(){
-          float r = length(vP);
-          float R = ${R_GAL.toFixed(2)};
-          if (r > R || r < 0.0005) discard;
-          float t   = r / R;
-          float ang = atan(vP.y, vP.x);
-
-          // --- structural layers (always on) ---
-          float bulge = exp(-t * 9.5);
-          float disk  = exp(-t * 2.2) * (1.0 - smoothstep(0.93, 1.0, t));
-          float ph    = ang + twist * log(max(t, 0.03));
-          float arm2  = pow(0.5 + 0.5 * cos(2.0 * ph), 9.0);
-          float arm4  = pow(0.5 + 0.5 * cos(4.0 * ph + 0.7), 6.0) * 0.45;
-          float armStr = arm2 + arm4;
-
-          // --- detail layers (gated by the 'detail' uniform) ---
-          // Dust lane: phase-shifted narrow spiral that SUBTRACTS light.
-          // Lies just inside each arm, like the dark band in real spirals.
-          float dustPh   = ph + 0.6;
-          float dustArm  = pow(0.5 + 0.5 * cos(2.0 * dustPh), 14.0);
-          float dustMod  = 1.0 - dustArm * 0.65 * smoothstep(0.02, 0.6, t) * detail;
-          // Clumpy texture along arms — noise-modulated brightness.
-          float clump = 1.0 - detail + detail * (0.6 + 0.55 * fbm(vec2(ang * 5.0, t * 11.0) + time * 0.04));
-          armStr *= clump;
-          // HII regions: bright pink star-forming knots on arm peaks.
-          float hii = detail * smoothstep(0.62, 0.86,
-                       fbm(vec2(ang * 7.0, t * 14.0) + time * 0.07)) * arm2;
-
-          // --- combined intensity ---
-          float intensity = (1.6 * bulge + disk * (0.65 + 1.10 * armStr)) * dustMod;
-
-          // --- color palette by radius ---
-          vec3 col = mix(edgeColor, midColor, smoothstep(0.8, 0.25, t));
-          col = mix(col, coreColor, smoothstep(0.25, 0.04, t));
-          col = mix(col, hiiColor, hii * 0.85);
-
-          gl_FragColor = vec4(col, clamp(intensity * alphaGlobal, 0.0, 1.0));
-          // suppress unused-uniform warning
-          float _t = time;
-        }
-      `
-    });
-    this.spiralMesh = new THREE.Mesh(spiralGeom, this.spiralMat);
-    this.spiralMesh.rotation.x = -Math.PI / 2;
-    this.scene.add(this.spiralMesh);
 
     // Self-gravity starlight: the live star distribution, binned on a fine
     // grid and smoothed, drawn as unresolved light under the star points. Its
@@ -519,17 +378,12 @@ export class GalaxyRegime extends Regime {
     const colors    = new Float32Array(N_STARS * 3);
 
     for (let i = 0; i < N_STARS; i++) {
-      // Density-wave spiral seed. Bulge-concentrated guiding radius; each star
-      // rides a precessing ellipse whose major axis twists with radius (that
-      // twist is the 2-arm pattern). Eccentricity grows outward so the bulge
-      // stays round and the outer arms read sharply.
+      // Placeholder position: the disk is seeded in equilibrium by sgInit()
+      // on the first update, which overwrites it.
       const u = rng();
       const gr = R_GAL * (0.05 + 0.95 * Math.pow(u, 0.65));
-      const ecc = this.armEcc * Math.min(1, gr / R_GAL);
       const phase0 = rng() * Math.PI * 2;
-      const omega = this.circularSpeed(gr) / Math.max(gr, 0.1);
-      const phi0 = this.armTwist * gr;        // pattern (major-axis) angle at t=0
-      const [x, z] = this.dwPos(gr, ecc, phase0, phi0);
+      const x = gr * Math.cos(phase0), z = gr * Math.sin(phase0);
       const y = (rng() - 0.5) * 0.5 * Math.exp(-gr / 6);
 
       positions[i * 3 + 0] = x;
@@ -549,8 +403,7 @@ export class GalaxyRegime extends Regime {
       colors[i * 3 + 1] = c.g;
       colors[i * 3 + 2] = c.b;
 
-      // Initial velocity — tangential RAR-circular speed (display only; the
-      // motion itself is prescribed analytically in update()).
+      // Placeholder velocity (overwritten by sgInit()).
       const vCirc = this.circularSpeed(gr);
       const thetaInit = Math.atan2(z, x);
       const body: Body = {
@@ -571,9 +424,7 @@ export class GalaxyRegime extends Regime {
         state: 'main',
         deathT: Infinity,
         spawnedBH: false,
-        gr, ecc, omega, phase0,
         yOff: y,
-        qx: 0, qy: 0, qz: 0, ux: 0, uy: 0, uz: 0,
       });
     }
 
@@ -881,19 +732,7 @@ export class GalaxyRegime extends Regime {
     return Math.sqrt(gObs * Math.max(r, 0.1));
   }
 
-  // Density-wave star position: the point at parameter `ang` on an ellipse of
-  // semi-major `gr` and eccentricity `ecc` whose major axis points at angle
-  // `phi`, returned as [x, z] in the galaxy plane. Arc-speed is slowest near
-  // the major-axis tips, so stars crowd there — that crowding is the arm.
-  // Rotating `phi` rigidly rotates the whole spiral without winding it.
-  private dwPos(gr: number, ecc: number, ang: number, phi: number): [number, number] {
-    const ex = gr * Math.cos(ang);
-    const ey = gr * (1 - ecc) * Math.sin(ang);
-    const cphi = Math.cos(phi), sphi = Math.sin(phi);
-    return [ex * cphi - ey * sphi, ex * sphi + ey * cphi];
-  }
-
-  // ======================= Experimental self-gravity =======================
+  // ============================ Self-gravity ============================
   // Particle-mesh (CIC) in-plane gravity on a grid centred on the SMBH, plus a
   // light central point mass, all RAR-boosted, integrated with velocity-Verlet.
   // Ported from the verified /tmp prototype. Read selfGravityStats() for health.
@@ -1138,34 +977,6 @@ export class GalaxyRegime extends Regime {
     this.sgGlowTex.needsUpdate = true;
   }
 
-  // Capture the evolved SG state (relative to the last SG-frame SMBH centre)
-  // so toggling to the painted disk and back resumes instead of re-seeding.
-  private sgSnapshot() {
-    const stars = this.stars;
-    for (let i = 0; i < stars.length; i++) {
-      const s = stars[i];
-      this.sgSaveX[i] = s.body.pos[0] - this.sgPrevCx;
-      this.sgSaveZ[i] = s.body.pos[2] - this.sgPrevCz;
-      this.sgSaveVx[i] = s.body.vel[0];
-      this.sgSaveVz[i] = s.body.vel[2];
-    }
-    this.sgSaved = true;
-  }
-
-  private sgRestore(cx: number, cy: number, cz: number) {
-    const stars = this.stars;
-    for (let i = 0; i < stars.length; i++) {
-      const s = stars[i];
-      s.body.pos[0] = cx + this.sgSaveX[i];
-      s.body.pos[2] = cz + this.sgSaveZ[i];
-      s.body.pos[1] = cy + s.yOff;
-      s.body.vel[0] = this.sgSaveVx[i];
-      s.body.vel[2] = this.sgSaveVz[i];
-    }
-    this.sgPrevCx = cx; this.sgPrevCy = cy; this.sgPrevCz = cz;
-    this.sgComputeAccel(cx, cz);   // prime the leapfrog kick
-  }
-
   // One leapfrog (KDK) step + health metrics. Disk held thin (y = SMBH plane).
   private sgUpdate(visDt: number, cx: number, cy: number, cz: number) {
     const stars = this.stars;
@@ -1230,7 +1041,6 @@ export class GalaxyRegime extends Regime {
     const visDt = visPerWall * ctx.dtWall * Math.sign(ctx.rate || 1);
     this.time += visDt;
     this.wallTime += ctx.dtWall;
-    this.spiralMat.uniforms.time.value = this.time;
     // Cosmic-time-driven assembly: the disk and stars fade up as the
     // galaxy forms. Roughly: nothing pre-first-stars (≲100 Myr), assembling
     // through 1 Gyr, fully visible by ~3 Gyr. Past that, slow brightening
@@ -1247,8 +1057,6 @@ export class GalaxyRegime extends Regime {
       this.a0Eff = a0New;
     }
     const galaxyAlpha = Math.min(1, Math.max(0, (tG - 0.1) / 2.0));
-    this.spiralMat.uniforms.alphaGlobal.value = galaxyAlpha;
-    this.spiralMat.uniforms.detail.value = ctx.diskDetailOn ? 1 : 0;
     // Bumped baseline from 0.15 — at low galaxyAlpha (early in cosmic time
     // or as a freshly-mounted regime) stars were so faint that with bloom
     // off the disk looked empty. 0.45 lets the dimmest unborn stars still
@@ -1256,11 +1064,9 @@ export class GalaxyRegime extends Regime {
     // Floor at 0.62 so the surrounding star field never dims to near-nothing
     // when galaxyAlpha is low (early assembly / freshly-mounted regime).
     this.starMaterial.opacity = Math.max(0.45 + 0.55 * galaxyAlpha, 0.62);
-    // In self-gravity mode the painted shader disk is hidden, so the bare point
-    // cloud carries the whole image — make the points bigger + fully opaque so
-    // the emergent structure reads instead of looking sparse.
-    this.starMaterial.size = ctx.selfGravityOn ? 0.19 : 0.13;
-    if (ctx.selfGravityOn) this.starMaterial.opacity = 1.0;
+    // The point cloud and its starlight carry the whole image.
+    this.starMaterial.size = 0.19;
+    this.starMaterial.opacity = 1.0;
     // Central SMBH grows with time (visualised as a slow accretion-disk
     // scale-up). Multiplier 0.85 → 1.15 from the Big Bang to today.
     const smbhGrowth = 0.85 + 0.3 * Math.min(1, tG / T_UNIV);
@@ -1271,9 +1077,6 @@ export class GalaxyRegime extends Regime {
     for (const bh of this.bhs) {
       bh.mesh.scale.setScalar((bh.isCentral ? smbhGrowth : 1) * VISUAL_BH_SCALE);
     }
-    // Disk toggle — when off, just the stars + BHs are visible (much more
-    // legible from below the galactic plane).
-    this.spiralMesh.visible = ctx.diskOn && galaxyAlpha > 0.01;
     for (const b of this.bhs) b.mesh.tick(this.time);
 
     // BH-BH gravity (stellar BHs orbit the central SMBH and feel each
@@ -1328,48 +1131,16 @@ export class GalaxyRegime extends Regime {
       this.mergeBHs();
     }
 
-    // Stars ride a density-wave (precessing-ellipse) kinematic spiral rather
-    // than free orbits. The paper's flat rotation curve (§15) means a spiral
-    // made of *material* stars on circular orbits winds up and shears away
-    // (the winding problem) — and free integration at high time-speed also lets
-    // the disk numerically disperse. Instead, the 2-arm pattern (each star's
-    // ellipse major-axis orientation) rotates RIGIDLY at patternOmega, so the
-    // arms never wind; meanwhile each star streams around its own ellipse at its
-    // true RAR rate Ω(r), so motion stays differential. Positions are
-    // closed-form and bounded, so the disk can neither wind out nor disperse at
-    // any speed. If an orbit carries a star inside a BH's tidal radius it is
-    // swallowed (feeds the BH), exactly as before.
-    const TIDAL_K = 0.055;      // r_tidal = TIDAL_K * sqrt(M) — feeding cue
-    const tOrb = this.time;
     // The disk is anchored to the central SMBH: stars orbit wherever it is, so
-    // dragging the SMBH carries the whole rotating disk with it. And if the
-    // central mass changes (a merger), refresh every star's streaming rate Ω(r)
-    // so the rotation curve itself updates, not just the centre.
+    // dragging the SMBH carries the whole disk with it.
     const centralBH = this.bhs.find(b => b.isCentral);
     const cx = centralBH ? centralBH.body.pos[0] : 0;
     const cy = centralBH ? centralBH.body.pos[1] : 0;
     const cz = centralBH ? centralBH.body.pos[2] : 0;
-    const cm = this.centralMass();
-    if (cm !== this.lastRotMass) {
-      this.lastRotMass = cm;
-      for (const s of this.stars) {
-        const newOmega = this.circularSpeed(s.gr) / Math.max(s.gr, 0.1);
-        // Preserve the current orbital phase so the rate change is smooth — ang
-        // = phase0 + omega*t would otherwise jump (t is large) and teleport stars.
-        s.phase0 += (s.omega - newOmega) * tOrb;
-        s.omega = newOmega;
-      }
-    }
-    // SMBH motion since last frame drives the transient slosh.
-    if (!this.centerInit) { this.prevCx = cx; this.prevCy = cy; this.prevCz = cz; this.centerInit = true; }
-    const dcx = cx - this.prevCx, dcy = cy - this.prevCy, dcz = cz - this.prevCz;
-    this.prevCx = cx; this.prevCy = cy; this.prevCz = cz;
-    if (ctx.selfGravityOn) {
-      // Experimental: real PM self-gravity + RAR. (Re)seed on enable.
+    {
+      // Particle-mesh self-gravity plus the paper's response. Seed on first use.
       if (!this.sgActive) {
-        const sameEpoch = Math.abs(Math.log(this.a0Eff / this.a0AtInit)) < 0.15;
-        if (this.sgSaved && sameEpoch) this.sgRestore(cx, cy, cz);   // resume the evolved disk
-        else this.sgInit(cx, cy, cz);                                 // first enable / new epoch: seed fresh
+        this.sgInit(cx, cy, cz);
         this.sgActive = true;
         this.sgReseed = false;
       } else if (this.sgReseed) {
@@ -1378,62 +1149,10 @@ export class GalaxyRegime extends Regime {
       }
       this.a0AtInit = this.a0Eff;
       this.sgUpdate(visDt, cx, cy, cz);
-    } else {
-    if (this.sgActive) { this.sgSnapshot(); this.sgActive = false; }
-    // Stable step for the slosh oscillator (semi-implicit Euler is stable for
-    // ω·dt < 2; clamp so a high time-speed frame can't blow it up).
-    const pdt = Math.min(Math.abs(visDt), 0.4);
-    const rCo = 0.55 * R_GAL;                                   // co-rotation radius
-    const patternOmega = (this.circularSpeed(rCo) / rCo) * PATTERN_FRAC;
-    const patternRot = patternOmega * tOrb;
-    // Tidal radii² of the black holes, hoisted out of the per-star loop.
-    const nBh = this.bhs.length, bhXYZR = new Float64Array(nBh * 4);
-    for (let b = 0; b < nBh; b++) {
-      const bh = this.bhs[b];
-      bhXYZR[b * 4] = bh.body.pos[0]; bhXYZR[b * 4 + 1] = bh.body.pos[1]; bhXYZR[b * 4 + 2] = bh.body.pos[2];
-      bhXYZR[b * 4 + 3] = TIDAL_K * TIDAL_K * bh.mass;
     }
-    for (const star of this.stars) {
-      if (star.state === 'absorbed') continue;
-      const phi = this.armTwist * star.gr + patternRot;   // arm (major-axis) angle
-      const ang = star.phase0 + star.omega * tOrb;     // streaming around ellipse
-      const [ox, oz] = this.dwPos(star.gr, star.ecc, ang, phi);
-      const ex = ox + cx, ey = star.yOff + cy, ez = oz + cz;   // equilibrium (anchored to SMBH)
-      // SMBH moved → shift the perturbation by −Δ so the star doesn't teleport;
-      // then relax it as a damped oscillator (frequency ∝ ω(r), so inner stars
-      // re-settle fast, outer stars lag → the disk warps and recovers).
-      star.qx -= dcx; star.qy -= dcy; star.qz -= dcz;
-      const w = star.omega, k = w * w, damp = 2 * SLOSH_DAMP * w;
-      star.ux += (-k * star.qx - damp * star.ux) * pdt;
-      star.uy += (-k * star.qy - damp * star.uy) * pdt;
-      star.uz += (-k * star.qz - damp * star.uz) * pdt;
-      star.qx += star.ux * pdt;
-      star.qy += star.uy * pdt;
-      star.qz += star.uz * pdt;
-      const px = ex + star.qx, py = ey + star.qy, pz = ez + star.qz;
-      star.body.pos[0] = px;
-      star.body.pos[1] = py;
-      star.body.pos[2] = pz;
-      for (let b = 0; b < nBh; b++) {
-        const rx = px - bhXYZR[b * 4], ry = py - bhXYZR[b * 4 + 1], rz = pz - bhXYZR[b * 4 + 2];
-        if (rx * rx + ry * ry + rz * rz < bhXYZR[b * 4 + 3]) {
-          star.state = 'absorbed';
-          star.deathT = tG;
-          const mesh = this.bhs[b].mesh as any;
-          mesh.feedPulse = (mesh.feedPulse ?? 0) + 0.6;
-          break;
-        }
-      }
-    }
-    } // end !selfGravityOn (density-wave path)
-    // Keep the spiral-shader disk centred on the SMBH too, so the whole galaxy
-    // moves coherently when the central BH is dragged. Hide it in self-gravity
-    // mode so the prescribed arms don't fight the emergent ones.
-    this.spiralMesh.position.set(cx, cy, cz);
-    if (ctx.selfGravityOn) this.spiralMesh.visible = false;
     // Density-glow disk: live mass field as light. Follows the SMBH (the grid
-    // is centred on it) and honours the disk toggle like the painted layer.
-    const glowOn = ctx.selfGravityOn && this.sgActive && ctx.diskOn && galaxyAlpha > 0.01;
+    // is centred on it) and honours the starlight toggle.
+    const glowOn = this.sgActive && ctx.diskOn && galaxyAlpha > 0.01;
     this.sgGlowMesh.visible = glowOn;
     if (glowOn) {
       if ((this.sgGlowTick++ & 1) === 0) this.sgRefreshGlow(cx, cz);   // every other frame is plenty for unresolved light

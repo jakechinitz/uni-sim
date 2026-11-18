@@ -90,10 +90,6 @@ const GROUPS: Group[] = [
         what: 'Self-gravitating stellar disk', status: 'method',
         note: 'Particle-mesh gravity among 24,000 stars with warm Toomre-stable initial conditions. Bars and arms that appear are emergent. The disk is razor-thin and the stock is taken at its equilibrium, not evolved.',
       },
-      {
-        what: 'Painted disk (self-gravity off)', status: 'decor',
-        note: 'Stars ride prescribed density-wave orbits on the law\'s rotation curve. Dust lanes and star-forming regions are artwork.',
-      },
     ],
   },
   {

@@ -500,11 +500,11 @@ export class App {
     const slice = decodeZoom(this.state.zoom);
     this.state.regime = slice.regime;
 
-    // Self-gravity clamps Myr/s and Gyr/s to the same stability-capped rate,
-    // but only the GALAXY regime runs that integrator — at cosmic scale Gyr/s
-    // is genuinely faster. So hide the Gyr/s chip (and fold the rate down)
-    // only while actually looking at a self-gravitating galaxy.
-    const sgGalaxy = (this.state.toggles.selfGravity ?? true) && slice.regime === 'GALAXY' && !this.anchors.current;
+    // The galaxy's disk integrator clamps Myr/s and Gyr/s to the same
+    // stability-capped rate, but only the GALAXY regime runs it — at cosmic
+    // scale Gyr/s is genuinely faster. So hide the Gyr/s chip (and fold the
+    // rate down) only while actually looking at a galaxy.
+    const sgGalaxy = slice.regime === 'GALAXY' && !this.anchors.current;
     const gyrChip = document.querySelector<HTMLButtonElement>('#speed-presets .chip[data-exp="16.5"]');
     if (gyrChip) {
       const want = sgGalaxy ? 'none' : '';
@@ -549,9 +549,7 @@ export class App {
         edePulse: ede,
         entanglementOn: this.state.toggles.entangle,
         diskOn: this.state.toggles.disk ?? true,
-        diskDetailOn: this.state.toggles.diskDetail ?? true,
         manyPastsOn: (this.state.toggles.manyPasts ?? false) && this.clock.direction === -1 && this.clock.playing,
-        selfGravityOn: this.state.toggles.selfGravity ?? true,
         dtWall,
         rate: this.clock.speed,
         quality,

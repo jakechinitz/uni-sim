@@ -40,9 +40,7 @@ export function bindUI(cb: UICallbacks) {
   const btnNew      = el<HTMLButtonElement>('btn-newseed');
   const togEnt      = el<HTMLInputElement>('toggle-entangle');
   const togDisk     = el<HTMLInputElement>('toggle-disk');
-  const togDiskD    = el<HTMLInputElement>('toggle-disk-detail');
   const togMP       = el<HTMLInputElement>('toggle-manypasts');
-  const togSG       = el<HTMLInputElement>('toggle-selfgrav');
   const togAF       = el<HTMLInputElement>('toggle-autofocus');
   const qualitySel  = document.getElementById('quality-select') as HTMLSelectElement | null;
 
@@ -74,12 +72,8 @@ export function bindUI(cb: UICallbacks) {
   // Backfill disk toggle for saves predating it (defensive: undefined → true)
   cb.state.toggles.disk = cb.state.toggles.disk ?? true;
   togDisk.checked   = cb.state.toggles.disk;
-  cb.state.toggles.diskDetail = cb.state.toggles.diskDetail ?? true;
-  togDiskD.checked  = cb.state.toggles.diskDetail;
   cb.state.toggles.manyPasts = cb.state.toggles.manyPasts ?? false;
   togMP.checked     = cb.state.toggles.manyPasts;
-  cb.state.toggles.selfGravity = cb.state.toggles.selfGravity ?? true;
-  togSG.checked     = cb.state.toggles.selfGravity;
   cb.state.toggles.autoFocus = cb.state.toggles.autoFocus ?? true;
   togAF.checked     = cb.state.toggles.autoFocus;
   paintTransport();
@@ -158,20 +152,12 @@ export function bindUI(cb: UICallbacks) {
     cb.state.toggles.entangle = togEnt.checked;
     cb.onChange();
   });
-  togDiskD.addEventListener('change', () => {
-    cb.state.toggles.diskDetail = togDiskD.checked;
-    cb.onChange();
-  });
   togDisk.addEventListener('change', () => {
     cb.state.toggles.disk = togDisk.checked;
     cb.onChange();
   });
   togMP.addEventListener('change', () => {
     cb.state.toggles.manyPasts = togMP.checked;
-    cb.onChange();
-  });
-  togSG.addEventListener('change', () => {
-    cb.state.toggles.selfGravity = togSG.checked;
     cb.onChange();
   });
   togAF.addEventListener('change', () => {
@@ -264,9 +250,7 @@ export function syncControls(state: SaveData) {
   (el<HTMLInputElement>('slider-speed')).value = String(state.speedExp);
   (el<HTMLInputElement>('toggle-entangle')).checked = state.toggles.entangle;
   (el<HTMLInputElement>('toggle-disk')).checked     = state.toggles.disk ?? true;
-  (el<HTMLInputElement>('toggle-disk-detail')).checked = state.toggles.diskDetail ?? true;
   (el<HTMLInputElement>('toggle-manypasts')).checked   = state.toggles.manyPasts ?? false;
-  (el<HTMLInputElement>('toggle-selfgrav')).checked     = state.toggles.selfGravity ?? true;
   (el<HTMLInputElement>('toggle-autofocus')).checked    = state.toggles.autoFocus ?? true;
   const qualitySel = document.getElementById('quality-select') as HTMLSelectElement | null;
   if (qualitySel) qualitySel.value = state.quality;
