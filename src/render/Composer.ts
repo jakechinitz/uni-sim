@@ -5,7 +5,7 @@
 // radial UV warp around each BH's projected position. Strength scales
 // with apparent angular size (≈ Schwarzschild radius / distance), so
 // distant BHs warp tiny regions and close-up SMBHs make obvious
-// Einstein-ring distortions. Paper §15: lensing potential = matter
+// Einstein-ring distortions. Paper §16: lensing potential = matter
 // potential (Φ = Ψ), so we don't have a slip term — the deflection
 // here is simply tied to the same mass that drives gravity.
 

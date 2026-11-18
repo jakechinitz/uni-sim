@@ -1,6 +1,6 @@
 // Anchor: Horizon Information Scrambling + Hawking Leakage.
 //
-// Paper context: §20 + §B (ln 2 per face, S_BH = A/4 from substrate
+// Paper context: §21 + §B (ln 2 per face, S_BH = A/4 from substrate
 // counting). Hayden–Preskill / Sekino–Susskind fast scrambling, with
 // the Vikram–Shou–Galitski lower bound on t_scr that the main sim
 // already surfaces in BH hover cards.
@@ -66,7 +66,7 @@ export class HorizonInformationAnchor extends Anchor {
     super({
       id: 'horizon-information',
       title: 'Horizon information · scramble + leak',
-      paperRef: '§20, App. B',
+      paperRef: '§21, App. B',
       blurb:
         'A structured payload falls into a BH. It gets stretched at the ' +
         'photon ring, ingested into horizon channels (ln 2 per face), then ' +

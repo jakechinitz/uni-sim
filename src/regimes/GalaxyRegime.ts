@@ -1,6 +1,6 @@
 // GALAXY: spiral disk + central BH. Stars ride a density-wave (precessing-
 // ellipse) spiral — the arms rotate rigidly while stars stream differentially
-// at the paper's flat RAR rotation curve (§14 — no dark matter needed). BHs are
+// at the paper's flat RAR rotation curve (§15 — no dark matter needed). BHs are
 // draggable; stars are click-to-focus.
 
 import * as THREE from 'three';
@@ -14,7 +14,7 @@ import { Body, nuRAR } from '../core/Gravity';
 import { TelegrapherField } from '../render/Telegrapher';
 import { ManyPasts } from '../render/ManyPasts';
 import { hawkingSolar, scrambling, formatSI } from '../core/Closure';
-import { M_SUN } from '../util/units';
+import { M_SUN, T_UNIV } from '../util/units';
 import { imfSample, mainSeqLifetime, SUPERNOVA_MASS } from '../core/StellarLifecycle';
 
 // 8,000 stars across an 18-unit disk — enough for a real spiral-galaxy
@@ -283,7 +283,7 @@ export class GalaxyRegime extends Regime {
     }
 
     // Stellar-mass BHs scattered through the disk (collapsed massive stars,
-    // paper §20 same q→0 mechanism, smaller scale). Visibly hot per Hawking.
+    // paper §21 same q→0 mechanism, smaller scale). Visibly hot per Hawking.
     const nStellar = 2 + Math.floor(rng() * 6);   // 2..7
     for (let i = 0; i < nStellar; i++) {
       const r   = 4 + rng() * (R_GAL - 6);
@@ -849,7 +849,7 @@ export class GalaxyRegime extends Regime {
     // (Plummer core, so no Keplerian cusp) + an exponential stellar disk. Both
     // enclosed-mass terms grow from ~0 at the centre, so the curve RISES from
     // the centre, peaks, then flattens — the real-galaxy shape — instead of the
-    // point-mass Keplerian decline. The paper's exponential RAR (§14) maps the
+    // point-mass Keplerian decline. The paper's exponential RAR (§15) maps the
     // enclosed baryonic g_bar to g_obs, so the deep-MOND Tully–Fisher tail
     // (fixed by the TOTAL mass) is unchanged. No central SMBH → soft floor.
     const Mtot    = Math.max(this.centralMass(), 60);
@@ -1171,8 +1171,8 @@ export class GalaxyRegime extends Regime {
     this.starMaterial.size = ctx.selfGravityOn ? 0.19 : 0.13;
     if (ctx.selfGravityOn) this.starMaterial.opacity = 1.0;
     // Central SMBH grows with time (visualised as a slow accretion-disk
-    // scale-up). Multiplier 0.85 → 1.15 over 0..13.8 Gyr.
-    const smbhGrowth = 0.85 + 0.3 * Math.min(1, tG / 13.8);
+    // scale-up). Multiplier 0.85 → 1.15 from the Big Bang to today.
+    const smbhGrowth = 0.85 + 0.3 * Math.min(1, tG / T_UNIV);
     // Visual-only shrink applied to every BH mesh so black holes don't swamp
     // the disk. Physics (merger reach, q-shell) derives from mass/rs, not mesh
     // scale, so this is purely cosmetic.
@@ -1238,7 +1238,7 @@ export class GalaxyRegime extends Regime {
     }
 
     // Stars ride a density-wave (precessing-ellipse) kinematic spiral rather
-    // than free orbits. The paper's flat rotation curve (§14) means a spiral
+    // than free orbits. The paper's flat rotation curve (§15) means a spiral
     // made of *material* stars on circular orbits winds up and shears away
     // (the winding problem) — and free integration at high time-speed also lets
     // the disk numerically disperse. Instead, the 2-arm pattern (each star's
@@ -1511,7 +1511,7 @@ export class GalaxyRegime extends Regime {
     this.telegrapher.update(visDt);
     this.updateSNFlares(tG);
 
-    // Many-Pasts ghost cloud (paper §21). Only visible when rewinding
+    // Many-Pasts ghost cloud (paper §22). Only visible when rewinding
     // and the toggle is on — drives off ctx.manyPastsOn (App already
     // requires direction=−1 to set it true).
     this.manyPasts.update(
@@ -1721,8 +1721,8 @@ export class GalaxyRegime extends Regime {
     const h = hawkingSolar(bh.realMassSolar);
     const s = scrambling(bh.realMassSolar * M_SUN);
     const title = bh.isCentral
-      ? 'Supermassive black hole · paper §20'
-      : 'Stellar-mass black hole · paper §20';
+      ? 'Supermassive black hole · paper §21'
+      : 'Stellar-mass black hole · paper §21';
     // Format t_scr in human-readable units depending on magnitude
     const t_scr_str =
       s.t_scr < 1     ? formatSI(s.t_scr, 's', 2)

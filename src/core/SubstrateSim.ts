@@ -18,7 +18,7 @@
 // −drainRate × kernel into q. They move ballistically + feel −∇q gradient
 // (paper §11–12: gravity = relaxation of substrate around defects). When two
 // defects come close their wells merge and q can drop below the q_sat
-// threshold → that patch is a saturated mini-BH (paper §20).
+// threshold → that patch is a saturated mini-BH (paper §21).
 //
 // Wave packets ("photons") are emitted as a Gaussian bump in q paired with
 // a matching Π so the bump moves coherently — propagates at exactly c.

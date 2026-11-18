@@ -29,7 +29,7 @@
         <button id="btn-forward" data-tip="Play forward in time">⏩</button>
       </div>
 
-      <label class="slider time-slider" data-tip="Scrub cosmic time from the Big Bang (0) to today (13.8 Gyr). Past today, play keeps going into the future.">
+      <label class="slider time-slider" data-tip="Scrub cosmic time from the Big Bang (0) to today (13.7 Gyr, the age the integrated background gives). Past today, play keeps going into the future.">
         <span class="lbl">time</span>
         <div class="time-track">
           <input id="slider-time" type="range" min="0" max="1" step="0.0001" value="0" />
@@ -38,11 +38,11 @@
                  BELOW, alternating to avoid horizontal collisions in the early
                  universe (Big Bang + EDE are nearly co-located on the scrub map). -->
             <span class="ep top" style="left:0%"     data-tip="Big Bang · t = 0 · the singularity">BB</span>
-            <span class="ep bot" style="left:3%"     data-tip="EDE Pulse · z ≈ 3000 (~50 kyr after Big Bang) — paper §18 Hubble-tension mechanism fires here">EDE</span>
-            <span class="ep top" style="left:39%"    data-tip="First stars + black holes form (~100 Myr)">1st stars</span>
-            <span class="ep bot" style="left:67%"    data-tip="First galaxies condense (~1 Gyr)">gal</span>
-            <span class="ep top" style="left:84%"    data-tip="Cosmic-web filaments materialise (~4 Gyr)">web</span>
-            <span class="ep bot" style="left:100%"   data-tip="Present day (13.8 Gyr) — past this point you're in the future">now</span>
+            <span class="ep bot" style="left:3%"     data-tip="Early pulse · z ≈ 3400 (~50 kyr after the Big Bang) — paper §19: the homogeneous mode wakes at matter–radiation equality, f_EDE = 0.018 ± 0.010">EDE</span>
+            <span class="ep top" style="left:39%"    data-tip="First stars + black holes form (z ≈ 25, ~130 Myr)">1st stars</span>
+            <span class="ep bot" style="left:67%"    data-tip="First galaxies condense (z ≈ 8, ~640 Myr)">gal</span>
+            <span class="ep top" style="left:84%"    data-tip="Cosmic-web filaments sharpen (~4 Gyr)">web</span>
+            <span class="ep bot" style="left:100%"   data-tip="Present day (13.7 Gyr) — past this point you're in the future">now</span>
           </div>
         </div>
         <span class="val" id="hud-time">t = 0 · z = ∞ · Big Bang</span>
@@ -89,7 +89,7 @@
         <label class="pill" data-tip="Show the entanglement-substrate field around masses. Each body carries its own halo; dragging moves it."><input id="toggle-entangle" type="checkbox" /><span>entanglement</span></label>
         <label class="pill" data-tip="Show the spiral disk overlay in galaxy view. Turn off to see just the stars + BHs."><input id="toggle-disk" type="checkbox" checked /><span>disk</span></label>
         <label class="pill" data-tip="Add dust lanes + pink HII star-forming regions + clumpy arm texture. Decorative — not part of the paper, but matches what real spirals look like in images."><input id="toggle-disk-detail" type="checkbox" checked /><span>disk-detail</span></label>
-        <label class="pill" data-tip="Many-Pasts (paper §21). When rewinding, faint ghost trajectories show alternate histories consistent with the present."><input id="toggle-manypasts" type="checkbox" /><span>many-pasts</span></label>
+        <label class="pill" data-tip="Many-Pasts (paper §22). When rewinding, faint ghost trajectories show alternate histories consistent with the present."><input id="toggle-manypasts" type="checkbox" /><span>many-pasts</span></label>
         <label class="pill" data-tip="Auto-focus: the faint reticle that automatically tracks whatever star/galaxy is nearest the centre of your view (it seeds the next zoom-in). Untick so nothing is highlighted unless you explicitly click it."><input id="toggle-autofocus" type="checkbox" checked /><span>auto-focus</span></label>
         <label class="pill" data-tip="Self-gravity (the default). The galaxy disk is REAL physics: stars feel each other's gravity through the paper's RAR, so a bar + spiral emerge and evolve on their own — the actual MOND dynamics. Untick for the painted density-wave disk instead: crisper and cheaper (a visualization, not a simulation), and the disk/disk-detail layers apply to it."><input id="toggle-selfgrav" type="checkbox" checked /><span>self-gravity</span></label>
       </div>
@@ -155,15 +155,15 @@
 
   <!-- Substrate-mode info panel + controls. Hidden unless current regime
        is SUBSTRATE. Surfaces the paper's discrete invariants (z=4, 7
-       face states, Ω_admissible = 1,680 of 7⁴ = 2,401) and the
+       face states, Ω_tet = 2·P(7,4) = 1,680) and the
        packet-emitter button. -->
   <div id="substrate-panel" class="hidden">
     <div class="sp-title">Substrate · paper §6, §17</div>
     <div class="sp-row"><span>Lattice cells</span><span id="sp-cells">4,096</span></div>
     <div class="sp-row"><span>Coordination</span><span>z = 4</span></div>
     <div class="sp-row"><span>Face states</span><span>7</span></div>
-    <div class="sp-row"><span>Ω<sub>raw</sub> · 7⁴</span><span>2,401</span></div>
-    <div class="sp-row"><span>Ω<sub>admissible</sub></span><span>1,680</span></div>
+    <div class="sp-row"><span>Injective labellings · P(7,4)</span><span>840</span></div>
+    <div class="sp-row"><span>Ω<sub>tet</sub> · × 2 orientations</span><span>1,680</span></div>
     <div class="sp-row"><span>g<sub>share,eff</sub></span><span>7.4198</span></div>
     <div class="sp-row"><span>Engine</span><span>τ₀ ∂²δS + ∂δS = D∇²δS</span></div>
     <div class="sp-row"><span>D / τ₀</span><span>= c²</span></div>

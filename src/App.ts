@@ -5,14 +5,14 @@ import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { Composer } from './render/Composer';
 import { RegimeManager } from './regimes/RegimeManager';
 import { Clock } from './core/Clock';
-import { z as cosmoZ, epoch as cosmoEpoch, edePulse } from './core/Cosmology';
+import { z as cosmoZ, a as cosmoA, epoch as cosmoEpoch, edePulse } from './core/Cosmology';
 import { decodeZoom } from './core/Camera';
 import { bindUI, setHud, syncControls, updateAnchorPanel } from './ui/ui';
 import { bindClosurePanel } from './ui/Closure';
 import { updateHoverCard, pinHoverCard, unpinHoverCard } from './ui/HoverCard';
 import { SaveData, autosave, emptySave, loadLocal } from './core/Store';
 import { DragController } from './core/Drag';
-import { formatRate } from './util/units';
+import { formatRate, T_UNIV } from './util/units';
 import type { RegimeKey } from './core/Camera';
 import { AnchorManager } from './anchors/AnchorManager';
 import { qualityForLevel } from './core/Quality';
@@ -22,7 +22,7 @@ import { qualityForLevel } from './core/Quality';
 // camera starting at its maxDistance. So scrolling carries you seamlessly
 // through cosmic → galaxy → system → substrate.
 const REGIME_LIMITS: Record<RegimeKey, { min: number; max: number }> = {
-  COSMIC:    { min: 12,  max: 200 },
+  COSMIC:    { min: 9,   max: 96  },
   GALAXY:    { min: 5,   max: 80  },
   SYSTEM:    { min: 35,  max: 550 },
   ATOMIC:    { min: 6,   max: 22  },
@@ -417,7 +417,7 @@ export class App {
   // Approximate physical width of the current view, for the HUD scale line.
   // COSMIC/GALAXY/SYSTEM are to relative scale; ATOMIC and SUBSTRATE are
   // schematic (the readout says so). Interpolates log-linearly within a band.
-  private scaleReadout(regime: RegimeKey, intra: number): string {
+  private scaleReadout(regime: RegimeKey, intra: number, tGyr: number): string {
     const BANDS: Record<RegimeKey, [number, number, string]> = {
       COSMIC:    [25.5, 23.5, 'the cosmic web'],
       GALAXY:    [21.3, 20.0, 'a spiral galaxy'],
@@ -426,10 +426,24 @@ export class App {
       SUBSTRATE: [-34.5, -35.0, 'the substrate lattice · schematic'],
     };
     const [hi, lo, label] = BANDS[regime];
-    const e = Math.round(hi + (lo - hi) * Math.min(1, Math.max(0, intra)));
+    let logM = hi + (lo - hi) * Math.min(1, Math.max(0, intra));
+    // The cosmic web is drawn in comoving coordinates; the physical size of
+    // the same patch is smaller by the scale factor a(t).
+    const aNow = regime === 'COSMIC' ? cosmoA(tGyr) : 1;
+    if (regime === 'COSMIC') logM += Math.log10(Math.max(aNow, 1e-12));
+    const e = Math.round(logM);
     const SUP: Record<string, string> = { '-': '⁻', '0': '⁰', '1': '¹', '2': '²', '3': '³', '4': '⁴', '5': '⁵', '6': '⁶', '7': '⁷', '8': '⁸', '9': '⁹' };
     const sup = String(e).split('').map(c => SUP[c] ?? c).join('');
-    return `view ≈ 10${sup} m · ${label}`;
+    const frame = regime === 'COSMIC'
+      ? ` · comoving view, a = ${aNow >= 0.01 ? aNow.toFixed(2) : aNow.toExponential(1)}` : '';
+    return `view ≈ 10${sup} m · ${label}${frame}`;
+  }
+
+  // While the structure-formation run is still streaming in, say so.
+  private webProgressNote(regime: RegimeKey): string {
+    if (regime !== 'COSMIC') return '';
+    const p = (this.regimes.current as unknown as { progress?: () => number }).progress?.();
+    return p !== undefined && p < 1 ? ` · forming structure ${Math.round(p * 100)} %` : '';
   }
 
   private loop = () => {
@@ -550,7 +564,7 @@ export class App {
     const ep = cosmoEpoch(tGyr);
     const tLabel = tGyr < 1e-3   ? `t = ${(tGyr * 1e6).toFixed(2)} kyr`
                   : tGyr < 1     ? `t = ${(tGyr * 1000).toFixed(0)} Myr`
-                  : tGyr < 13.8  ? `t = ${tGyr.toFixed(2)} Gyr`
+                  : tGyr <= T_UNIV + 0.005 ? `t = ${tGyr.toFixed(2)} Gyr`
                   : tGyr < 100   ? `t = ${tGyr.toFixed(2)} Gyr · future`
                                  : `t = ${tGyr.toExponential(2)} Gyr · far future`;
     const zLabel = isFinite(zR) ? (zR > 1000 ? `z ≈ ${zR.toExponential(2)}` : `z ≈ ${zR.toFixed(2)}`) : 'z ≈ ∞';
@@ -561,7 +575,7 @@ export class App {
         ? `log-pace · ${this.clock.logPaceWallSec}s sweep`
         : formatRate(this.clock.speed),
       epoch: ep.label,
-      scale: this.scaleReadout(slice.regime, slice.intra)
+      scale: this.scaleReadout(slice.regime, slice.intra, tGyr) + this.webProgressNote(slice.regime)
     });
 
     // Substrate info panel — visible only at SUBSTRATE scale

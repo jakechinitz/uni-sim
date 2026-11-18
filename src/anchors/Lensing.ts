@@ -1,6 +1,6 @@
 // Anchor: Gravitational Lensing · No-Slip Consistency.
 //
-// Paper context: §15. The paper's scalar entanglement sector does not
+// Paper context: §16. The paper's scalar entanglement sector does not
 // generate anisotropic stress at leading weak-field order, so the
 // lensing potential Φ_lens = Ψ (the same potential that moves matter).
 // This is "no-slip" lensing — same effective potential bends light AND
@@ -39,9 +39,9 @@ export class LensingAnchor extends Anchor {
     super({
       id: 'lensing-no-slip',
       title: 'Lensing · no-slip consistency',
-      paperRef: '§15',
+      paperRef: '§16',
       blurb:
-        'Paper §15: scalar entanglement sector has no anisotropic stress, ' +
+        'Paper §16: scalar entanglement sector has no anisotropic stress, ' +
         'so Φ_lens = Ψ — the same effective potential that drives orbits ' +
         'bends light. A single SMBH against a grid of background sources; ' +
         'the screen-space lens pass deflects pixels around the BH at the ' +

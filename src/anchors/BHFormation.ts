@@ -1,7 +1,7 @@
 // Anchor: Black-Hole Formation as a Saturation Boundary.
 //
-// Paper context: §20 (q→0 saturation = horizon; manifold ends at q=0,
-// nothing physical continues to a singular centre). §15 (q(r) = 1 − r_s/r
+// Paper context: §21 (q→0 saturation = horizon; manifold ends at q=0,
+// nothing physical continues to a singular centre). §11 (q(r) = 1 − r_s/r
 // for the exterior). The point of this demo is to make the paper's
 // distinctive ontological claim visible:
 //
@@ -50,7 +50,7 @@ export class BHFormationAnchor extends Anchor {
     super({
       id: 'bh-formation',
       title: 'BH formation as saturation boundary',
-      paperRef: '§15, §20',
+      paperRef: '§11, §21',
       blurb:
         'A dust cloud collapses. The bounded substrate capacity q is drained ' +
         'toward the centre. When q reaches the q=0 free boundary a horizon ' +

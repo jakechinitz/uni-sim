@@ -26,10 +26,10 @@ export const ANCHORS: AnchorEntry[] = [
     meta: {
       id: 'bh-formation',
       title: 'BH formation as saturation boundary',
-      paperRef: '§15, §20',
+      paperRef: '§11, §21',
       blurb:
         'A dust cloud collapses. The substrate capacity q is drained at ' +
-        'the centre. When q → 0 a horizon SHELL forms — paper §20: the ' +
+        'the centre. When q → 0 a horizon SHELL forms — paper §21: the ' +
         'manifold ends at q=0, no singular centre is drawn inside. ' +
         'Distinctive paper claim — the BH is a saturation surface, not ' +
         'a point of infinite density.',
@@ -72,7 +72,7 @@ export const ANCHORS: AnchorEntry[] = [
     meta: {
       id: 'bh-merger',
       title: 'BH–BH inspiral + ringdown',
-      paperRef: '§17, §20',
+      paperRef: '§17, §21',
       blurb:
         'Two equal-mass SMBHs spiral inward, merge into one saturation ' +
         'surface, and emit a telegrapher ringdown shell at lattice-c — ' +
@@ -87,7 +87,7 @@ export const ANCHORS: AnchorEntry[] = [
     meta: {
       id: 'rar-transition',
       title: 'Galactic RAR transition · flat rotation',
-      paperRef: '§14',
+      paperRef: '§15',
       blurb:
         'A central baryonic mass with 9 test stars at radii spanning ' +
         'deep-Newton (inner) to deep-MOND (outer). Cool stars follow the ' +
@@ -102,9 +102,9 @@ export const ANCHORS: AnchorEntry[] = [
     meta: {
       id: 'lensing-no-slip',
       title: 'Lensing · no-slip consistency',
-      paperRef: '§15',
+      paperRef: '§16',
       blurb:
-        'Paper §15: scalar entanglement sector has no anisotropic stress, ' +
+        'Paper §16: scalar entanglement sector has no anisotropic stress, ' +
         'so Φ_lens = Ψ — the same effective potential that drives orbits ' +
         'bends light. A single SMBH against a grid of background sources; ' +
         'the screen-space lens pass deflects pixels around the BH at the ' +
@@ -117,7 +117,7 @@ export const ANCHORS: AnchorEntry[] = [
     meta: {
       id: 'horizon-information',
       title: 'Horizon information · scramble + leak',
-      paperRef: '§20, App. B',
+      paperRef: '§21, App. B',
       blurb:
         'A structured payload falls into a BH. It gets stretched at the ' +
         'photon ring, ingested into horizon channels (ln 2 per face), then ' +
@@ -132,11 +132,11 @@ export const ANCHORS: AnchorEntry[] = [
     meta: {
       id: 'cosmological-activation',
       title: 'Cosmological activation · Hubble tension',
-      paperRef: '§18',
+      paperRef: '§19',
       blurb:
         'A 3D history rail of cosmic epochs. The trace-coupled scalar χ ' +
         'is dormant during radiation (T^μ_μ = 0), spikes at matter-rad ' +
-        'equality (paper §18 EDE pulse), then dilutes through the dark ' +
+        'equality (paper §19 EDE pulse), then dilutes through the dark ' +
         'ages. A playhead sweeps cosmic time on a log scale; the χ curve ' +
         "lights up exactly where the paper's Hubble-tension mechanism " +
         'turns on.',

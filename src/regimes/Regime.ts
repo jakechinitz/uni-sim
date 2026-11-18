@@ -19,7 +19,7 @@ export interface RegimeContext {
   entanglementOn: boolean;
   diskOn: boolean;         // galaxy spiral overlay toggle
   diskDetailOn: boolean;   // dust lanes + HII regions + arm clumps (cosmetic)
-  manyPastsOn: boolean;    // §21 ghost-trajectory overlay (visible when rewinding)
+  manyPastsOn: boolean;    // §22 ghost-trajectory overlay (visible when rewinding)
   selfGravityOn: boolean;  // experimental: galaxy disk feels its own gravity
   dtWall: number;          // wall-clock seconds since last frame (UI animations)
   rate: number;            // current sim_sec / wall_sec from the speed slider
@@ -36,6 +36,9 @@ export interface DragTarget {
   onDragMove: (p: THREE.Vector3) => void;
   // Called on release with linear velocity (world units / second).
   onDragEnd: (v: THREE.Vector3) => void;
+  // Selectable but not movable: a press never grabs it, so dragging over it
+  // orbits the camera as usual; a click still selects it.
+  clickOnly?: boolean;
 }
 
 export interface HoverInfo {

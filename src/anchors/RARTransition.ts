@@ -1,6 +1,6 @@
 // Anchor: Galactic RAR Transition.
 //
-// Paper context: §14, eq. for g_obs vs g_bar. The paper's central
+// Paper context: §15, eq. for g_obs vs g_bar. The paper's central
 // observational claim is that one acceleration law
 //
 //     g_obs = g_bar / (1 − exp(−√(g_bar/a₀)))
@@ -49,7 +49,7 @@ export class RARTransitionAnchor extends Anchor {
     super({
       id: 'rar-transition',
       title: 'Galactic RAR transition · flat rotation',
-      paperRef: '§14',
+      paperRef: '§15',
       blurb:
         'A central baryonic mass + 9 test stars at radii spanning ' +
         'deep-Newton (inner) to deep-MOND (outer). Cool stars use the ' +

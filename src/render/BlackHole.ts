@@ -1,8 +1,8 @@
 // Black hole rendering — paper-faithful: every BH visual is driven from
-// the substrate capacity field q(r) = max(0, 1 − r_s/r) (paper §15, §20).
+// the substrate capacity field q(r) = max(0, 1 − r_s/r) (paper §11, §21).
 // Three layers:
 //   1. Horizon: opaque black sphere at r_s. This is the q=0 saturation
-//      surface (paper §20: q=0 ⇒ horizon, the manifold ends here).
+//      surface (paper §21: q=0 ⇒ horizon, the manifold ends here).
 //   2. q-field shell: an additive sphere ~5 r_s wide whose fragment
 //      shader screen-space ray-traces each pixel to find the impact
 //      parameter b = closest approach of the camera ray to the BH
@@ -11,7 +11,7 @@
 //      whose intensity tracks (1−q); outside, a Gaussian photon-ring
 //      peak at b ≈ b_c plus a 1/r²-ish ambient. No fudged Fresnel.
 //   3. Accretion disk: flat additive ring shader, paper-style decoration
-//      (paper says nothing specific about disk dynamics — §20 only notes
+//      (paper says nothing specific about disk dynamics — §21 only notes
 //      the exterior should approach a Vaidya metric during accretion).
 //
 // The `localQ` uniform damps everything by the far-field q at this BH's
@@ -48,7 +48,7 @@ export class BlackHole extends THREE.Group {
     const ro = (opts.diskOuter ?? 8.0) * r;
     const tilt = opts.diskTilt ?? 0.45;
 
-    // Event horizon — opaque black sphere at q=0 (paper §20).
+    // Event horizon — opaque black sphere at q=0 (paper §21).
     const horizonGeom = new THREE.SphereGeometry(r, 48, 32);
     const horizonMat  = new THREE.MeshBasicMaterial({ color: 0x000000 });
     this.horizon = new THREE.Mesh(horizonGeom, horizonMat);
@@ -105,7 +105,7 @@ export class BlackHole extends THREE.Group {
           vec3 closest = cameraPos + t_ca * rayDir;
           float b = length(closest - bhCenter);
 
-          // Paper §15-§20: capacity field q(r) = max(0, 1 − r_s/r). At
+          // Paper §11, §21: capacity field q(r) = max(0, 1 − r_s/r). At
           // the horizon q = 0; far away q → 1. We index by impact
           // parameter b — what the ray "sees" outside.
           if (b < rs) discard;                         // horizon mesh draws the disc

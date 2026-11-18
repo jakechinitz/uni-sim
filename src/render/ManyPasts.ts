@@ -1,4 +1,4 @@
-// Many-Pasts (paper §21) ghost-trajectory overlay.
+// Many-Pasts (paper §22) ghost-trajectory overlay.
 //
 // When the clock is rewinding, the simulator's forward integrator is the
 // "present-pointed" branch — the operational reduction picks out the

@@ -1,9 +1,9 @@
 // Anchor: Cosmological Activation Story.
 //
-// Paper context: §18. The homogeneous mode of the entanglement scalar
+// Paper context: §19. The homogeneous mode of the entanglement scalar
 // is *dormant in radiation domination* (T^μ_μ = 0, no trace source).
 // It activates as the universe transitions to matter-domination near
-// z ≈ 3000, producing a transient early-dark-energy pulse that shifts
+// z ≈ 3400, producing a small transient early-dark-energy pulse (f_EDE = 0.018) that shifts
 // the sound-horizon-inferred Hubble constant in the right direction.
 // The mode then dilutes through the dark ages.
 //
@@ -18,6 +18,7 @@
 import * as THREE from 'three';
 import { Anchor, AnchorContext } from './Anchor';
 import { traceChi, edePulse } from '../core/Cosmology';
+import { T_UNIV } from '../util/units';
 import { radialGlow } from '../render/Glow';
 
 // 8 paper-labelled epochs along the rail, log-spaced in cosmic time.
@@ -33,7 +34,7 @@ const EPOCHS: { tGyr: number; label: string; lane: 0 | 1 }[] = [
   { tGyr: 3.8e-4, label: 'Recomb',       lane: 0 },
   { tGyr: 0.15,   label: 'First stars',  lane: 1 },
   { tGyr: 1.0,    label: 'Galaxies',     lane: 0 },
-  { tGyr: 13.8,   label: 'Today',        lane: 1 }
+  { tGyr: T_UNIV, label: 'Today',        lane: 1 }
 ];
 
 const RAIL_LEN     = 22;        // sim units (the rail spans -RAIL_LEN/2 .. +RAIL_LEN/2 on X)
@@ -54,11 +55,11 @@ export class CosmologicalActivationAnchor extends Anchor {
     super({
       id: 'cosmological-activation',
       title: 'Cosmological activation · Hubble tension',
-      paperRef: '§18',
+      paperRef: '§19',
       blurb:
         'A 3D history rail of cosmic epochs. The trace-coupled scalar χ ' +
         'is dormant during radiation (T^μ_μ = 0), spikes at matter-rad ' +
-        'equality (paper §18 EDE pulse), then dilutes through the dark ' +
+        'equality (paper §19 EDE pulse), then dilutes through the dark ' +
         'ages. The playhead sweeps cosmic time on a log scale; watch the ' +
         'χ curve light up exactly at the equality crossing.',
       tier: 2
@@ -85,10 +86,10 @@ export class CosmologicalActivationAnchor extends Anchor {
   // --- construction helpers ----------------------------------------------
 
   // Map cosmic time t (in Gyr, log-scaled) to X position on the rail.
-  // Range: 1e-9 Gyr → -RAIL_LEN/2; 13.8 Gyr → +RAIL_LEN/2.
+  // Range: 1e-9 Gyr → -RAIL_LEN/2; today → +RAIL_LEN/2.
   private tToX(tGyr: number): number {
     const lt = Math.log10(Math.max(tGyr, 1e-12));
-    const ltMin = Math.log10(1e-9), ltMax = Math.log10(13.8);
+    const ltMin = Math.log10(1e-9), ltMax = Math.log10(T_UNIV);
     const u = (lt - ltMin) / (ltMax - ltMin);
     return -RAIL_LEN / 2 + u * RAIL_LEN;
   }
@@ -182,7 +183,7 @@ export class CosmologicalActivationAnchor extends Anchor {
     const pts = new Float32Array(TRACE_PTS * 3);
     for (let i = 0; i < TRACE_PTS; i++) {
       const u = i / (TRACE_PTS - 1);
-      const ltMin = Math.log10(1e-9), ltMax = Math.log10(13.8);
+      const ltMin = Math.log10(1e-9), ltMax = Math.log10(T_UNIV);
       const lt = ltMin + u * (ltMax - ltMin);
       const tGyr = Math.pow(10, lt);
       const v = kind === 'chi' ? traceChi(tGyr) : edePulse(tGyr);
@@ -266,7 +267,7 @@ export class CosmologicalActivationAnchor extends Anchor {
 
     // Convert playhead position back to cosmic time so we can read the
     // current χ amplitude — drives the pulse glow.
-    const ltMin = Math.log10(1e-9), ltMax = Math.log10(13.8);
+    const ltMin = Math.log10(1e-9), ltMax = Math.log10(T_UNIV);
     const lt = ltMin + u * (ltMax - ltMin);
     const tGyr = Math.pow(10, lt);
     const chi = traceChi(tGyr);

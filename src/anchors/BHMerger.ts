@@ -2,7 +2,7 @@
 //
 // Paper context: §17 (telegrapher front carries the merger ringdown
 // outward at c; D/τ₀ = c² is the substrate's gravitational-wave-analogue
-// speed). §20 (BH = q→0 saturation; merger combines two saturation
+// speed). §21 (BH = q→0 saturation; merger combines two saturation
 // surfaces into one).
 //
 // Visualization:
@@ -54,7 +54,7 @@ export class BHMergerAnchor extends Anchor {
     super({
       id: 'bh-merger',
       title: 'BH–BH inspiral + ringdown',
-      paperRef: '§17, §20',
+      paperRef: '§17, §21',
       blurb:
         'Two equal-mass SMBHs spiral inward, merge into one saturation ' +
         'surface, and emit a telegrapher ringdown shell propagating at ' +

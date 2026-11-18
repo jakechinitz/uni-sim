@@ -1,8 +1,12 @@
 // Physical constants & length scales. Paper-faithful values where relevant.
 
-export const G   = 6.674e-11;   // SI Newton constant (RAR strong-field limit)
-export const c   = 2.998e8;     // m/s
-export const H0  = 2.18e-18;    // Hubble today, s^-1 (~67 km/s/Mpc)
+import { H0_SI, T_TODAY } from '../core/Cosmology';
+
+export const G   = 6.67430e-11; // SI Newton constant, CODATA 2018 (±0.00015)
+export const c   = 299792458;   // m/s (exact)
+// Hubble constant today, s⁻¹ — an OUTPUT of the sim's integrated background
+// (core/Cosmology.ts: h = 0.693 from ω_b and the paper's release history).
+export const H0  = H0_SI;
 
 // Paper-derived structure invariants
 export const TET_FACES   = 4;
@@ -14,11 +18,11 @@ export const TET_MICROSTATES = 1680;
 // (L* = 1.60771947 × 10⁻³⁵ m, G* = 6.60399128 × 10⁻¹¹ m³ kg⁻¹ s⁻²).
 export const G_SHARE_EFF = 7.41980002357;
 
-// a₀ derived from the paper's closure: a₀ = g_share,eff · cH₀ / (4π²)
-// (paper §14 eq. 9, no fit). With H₀ = 2.18×10⁻¹⁸ s⁻¹ (≈ 67.3 km/s/Mpc)
-// this evaluates to ~1.228 × 10⁻¹⁰ m/s² — within ~2.3 % of McGaugh's
-// empirical 1.20 × 10⁻¹⁰. Used everywhere instead of a hardcoded value
-// so the live sim, the Closure panel, and the paper all agree.
+// a₀ = g_share,eff · cH₀ / (4π²) = ε c H₀ (paper §15). With the background's
+// own H₀ = 69.3 km/s/Mpc this is 1.27 × 10⁻¹⁰ m/s² (paper: 1.27 ± 0.04;
+// McGaugh's empirical value is 1.20). At redshift z the scale is
+// a₀(z) = ε c H(z). Used everywhere instead of a hardcoded value so the live
+// sim, the Closure panel and the paper agree.
 export const a0 = (G_SHARE_EFF / (4 * Math.PI * Math.PI)) * c * H0;
 
 export const M_SUN = 1.989e30;  // kg
@@ -29,13 +33,10 @@ export const MPC   = 1e6 * PC;
 export const AU    = 1.496e11;
 export const LY    = 9.461e15;
 export const GYR   = 3.156e16;  // s
-export const T_UNIV = 13.8;     // Gyr, paper
+// Age of the universe today (Gyr): t(a = 1) of the integrated background, ≈ 13.70.
+export const T_UNIV = T_TODAY;
 
 // Cosmology
-export const Z_EQ        = 3400;      // matter-radiation equality, where EDE pulse fires
-export const Z_RECOMB    = 1100;
-export const Z_FIRST_BH  = 25;
-export const Z_GALAXIES  = 8;
 
 export const SCALE = {
   // log10(metres) midpoint for each regime

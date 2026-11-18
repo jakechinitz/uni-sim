@@ -36,6 +36,7 @@ export class DragController {
   private pending: Pending | null = null;
   private pendingTimer: number | null = null;
   private bgClickStart: { x: number; y: number; t: number } | null = null;
+  private clickOnlyStart: { target: DragTarget; hoverInfo: HoverInfo | null; x: number; y: number; t: number } | null = null;
   private dragPlane = new THREE.Plane();
   private cursor = document.getElementById('cursor')!;
   private canvas: HTMLCanvasElement;
@@ -113,6 +114,12 @@ export class DragController {
     this.bgClickStart = null;
     const target = this.regimePick(hits[0]);
     if (!target) return;
+    if (target.clickOnly) {
+      // Selectable-only target: leave OrbitControls alone and just remember
+      // the press, so a release without movement counts as a click on it.
+      this.clickOnlyStart = { target, hoverInfo: this.regimeHover(hits[0]), x: ev.clientX, y: ev.clientY, t: performance.now() };
+      return;
+    }
     // ARM a pending pickup. Don't grab yet.
     this.pending = {
       target,
@@ -216,6 +223,15 @@ export class DragController {
       this.clearPending();
       if (this.controls) this.controls.enabled = true;
       this.onClickTarget(p.hoverInfo, p.target, _ev.clientX, _ev.clientY);
+      return;
+    }
+    if (this.clickOnlyStart) {
+      const c = this.clickOnlyStart;
+      this.clickOnlyStart = null;
+      const dx = _ev.clientX - c.x, dy = _ev.clientY - c.y;
+      if (dx * dx + dy * dy < 25 && performance.now() - c.t < 400) {
+        this.onClickTarget(c.hoverInfo, c.target, _ev.clientX, _ev.clientY);
+      }
       return;
     }
     // Background click — released without drag on empty canvas. Used to

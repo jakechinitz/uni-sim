@@ -1,6 +1,7 @@
 // Closure-chain modal — renders the live numeric derivation
-// 1,680 microstates → η* → g_share,eff → J_eff^(ren) → L* → G
-// (paper §6–9, §13). Every value is computed, not hard-coded.
+// 1,680 microstates → η* → g_share,eff → L*⁽⁰⁾ → Z_e → L* → G*
+// (paper §6–9, §13). Every value is computed, not hard-coded. The edge
+// coupling J_eff is shown for completeness; it cancels out of G and a₀.
 
 import { computeClosure, formatSI, leptonLadder } from '../core/Closure';
 
@@ -18,7 +19,7 @@ function chainRows(): ChainRow[] {
     {
       step: '1',
       what: 'Tetrahedral microstates',
-      detail: 'Ω_tet · 4 faces × 7 face-states (j₀ = 3/2), admissibility-closed',
+      detail: 'Ω_tet = 2·P(7,4): 4 faces, 7 face-states, injective labellings × 2 orientations',
       value: `Ω = ${k.omega_tet.toLocaleString()}`
     },
     {
@@ -30,7 +31,7 @@ function chainRows(): ChainRow[] {
     {
       step: '3',
       what: 'Sharing entropy',
-      detail: 'admissibility-weighted, survives closure',
+      detail: 'entropy of the e^{−ηK²}-weighted ensemble at η*',
       value: `g_share,eff = ${k.gshare.toFixed(4)}`
     },
     {
@@ -48,7 +49,7 @@ function chainRows(): ChainRow[] {
     {
       step: '6',
       what: 'Loop dressing',
-      detail: 'Σ_ret = 65/9 from 7 sector-diag + 1 shared-singlet',
+      detail: 'Σ_ret = 65/9 from 7 sector-diag + 1 shared-singlet · cancels out of G and a₀',
       value: `J_eff^(ren) = ${k.j_eff_renorm.toFixed(6)}`
     },
     {
@@ -59,27 +60,39 @@ function chainRows(): ChainRow[] {
     },
     {
       step: '8',
-      what: 'Substrate length',
-      detail: 'L* = (3/2)·λe·exp(−7·g_share,eff)',
-      value: formatSI(k.L_star, 'm')
+      what: 'Baseline length',
+      detail: `L*⁽⁰⁾ = −(3/2)·λe·ln(1 − e^{−7g}) · alone gives G ${k.G_dev_0_pct.toFixed(2)} % from CODATA`,
+      value: formatSI(k.L_star_0, 'm', 5)
     },
     {
       step: '9',
+      what: 'Marked-transfer vertex',
+      detail: 'ζ* = 9e^{−g}(1 − 8η*/49)^{21/2},  Z_e = (1 + ζ*)(1 + 7ζ*²)',
+      value: `ζ* = ${k.zeta_star.toFixed(9)} · Z_e = ${k.Z_e.toFixed(8)}`
+    },
+    {
+      step: '10',
+      what: 'Substrate length',
+      detail: `L* = Z_e·L*⁽⁰⁾ · Planck length ${formatSI(k.L_planck, 'm', 5)} · tick τ* = L*/c = ${formatSI(k.tau_star, 's')}`,
+      value: formatSI(k.L_star, 'm', 7)
+    },
+    {
+      step: '11',
       what: 'Induced gravity',
       detail: 'G* = c³ L*² / ℏ',
-      value: formatSI(k.G_star, 'm³ kg⁻¹ s⁻²')
+      value: formatSI(k.G_star, 'm³ kg⁻¹ s⁻²', 7)
     },
     {
       step: '✓',
       what: 'Match to Newton',
-      detail: `CODATA G = ${formatSI(k.G_codata, '')}`,
-      value: `${(100 + k.G_dev_pct).toFixed(2)}% of G`,
-      tone: Math.abs(k.G_dev_pct) < 2 ? 'match' : 'dev'
+      detail: `CODATA G = ${formatSI(k.G_codata, '', 5)} ± 0.00015`,
+      value: `${((k.G_star - k.G_codata) / 0.00015e-11).toFixed(3)} σ  (${(k.G_dev_pct * 1e4).toFixed(1)} ppm)`,
+      tone: Math.abs(k.G_dev_pct) < 0.01 ? 'match' : 'dev'
     },
     {
       step: '★',
       what: 'Galactic acceleration',
-      detail: 'a₀ = g_share,eff/(4π²)·cH₀ — paper §14, no fit',
+      detail: `a₀ = g_share,eff/(4π²)·cH₀ — paper §15 · H₀ = ${(k.H0 / 3.240779e-20).toFixed(1)} km/s/Mpc from this sim's integrated background · observed 1.20 × 10⁻¹⁰`,
       value: formatSI(k.a_0, 'm/s²'),
       tone: Math.abs((k.a_0 - k.a_0_obs) / k.a_0_obs) < 0.1 ? 'match' : undefined
     },
@@ -88,22 +101,21 @@ function chainRows(): ChainRow[] {
 
 function leptonRows(): ChainRow[] {
   const L = leptonLadder();
-  const fmt = (x: number) => x.toFixed(2);
-  const pct = (d: number) => `${d > 0 ? '+' : ''}${d.toFixed(2)} %`;
+  const ppm = (d: number) => `${d > 0 ? '+' : ''}${(d * 1e4).toFixed(2)} ppm`;
   return [
     {
       step: 'μ',
       what: 'Muon mass ratio',
-      detail: `${L.formula}, N=1 → 720·(2/7) = 1440/7`,
-      value: `${fmt(L.muon.predicted)} (PDG ${fmt(L.muon.pdg)}; ${pct(L.muon.devPct)})`,
-      tone: Math.abs(L.muon.devPct) < 1 ? 'match' : undefined
+      detail: `720·(2/7)·Z_μ,  Z_μ = 1 + ζ* · shell integers alone: ${L.muon.shell.toFixed(2)}`,
+      value: `${L.muon.predicted.toFixed(6)} (PDG ${L.muon.pdg.toFixed(6)}; ${ppm(L.muon.devPct)})`,
+      tone: Math.abs(L.muon.devPct) < 0.01 ? 'match' : undefined
     },
     {
       step: 'τ',
       what: 'Tau mass ratio',
-      detail: `${L.formula}, N=2 → 720²·(2/7)⁴`,
-      value: `${fmt(L.tau.predicted)} (PDG ${fmt(L.tau.pdg)}; ${pct(L.tau.devPct)})`,
-      tone: Math.abs(L.tau.devPct) < 1 ? 'match' : undefined
+      detail: `720²·(2/7)⁴·Z_μ·Z_τ,2,  Z_τ,2 = 1 + (2/7)ζ* · shell integers alone: ${L.tau.shell.toFixed(1)}`,
+      value: `${L.tau.predicted.toFixed(3)} (PDG ${L.tau.pdg.toFixed(2)} ± 0.09; ${ppm(L.tau.devPct)})`,
+      tone: Math.abs(L.tau.devPct) < 0.01 ? 'match' : undefined
     },
   ];
 }
@@ -126,23 +138,26 @@ function ensureRendered() {
   `;
   bodyEl.innerHTML = chainRows().map(renderRow).join('') +
     `<div class="chain-foot">
-      The chain runs <em>top to bottom with zero free parameters</em>. The electron
-      mass — the lightest one-bit fermionic defect — sets the substrate spacing
-      L*, which in turn sets G*. Match to Newton at the 1% level is a closure
-      result, not a fit. The MOND scale a₀ arises from the same arithmetic
-      crossed with the cosmological horizon thermal acceleration cH₀.
+      The chain runs <em>top to bottom with no continuously fitted coefficient</em>.
+      The electron mass is the one dimensionful anchor; it sets the substrate
+      length L*, which sets G*. The seven-channel baseline alone lands 1.05 %
+      low; the marked-transfer vertex Z_e closes the gap to the 10⁻⁶ level.
+      The paper records that this vertex was constructed after the residuals
+      were known, so the match is a high-precision <em>postdiction</em>, not a
+      blind prediction. a₀ comes from the same g_share,eff and the horizon
+      rate H₀, and scales with epoch as a₀(z) = ε c H(z).
     </div>
     <div class="panel-title" style="margin-top:18px; padding-top:14px; border-top:1px solid var(--line);">
-      Charged-lepton mass ladder · paper §I.1
+      Charged-lepton mass ratios · paper §13.5
     </div>
     ` +
     leptonRows().map(renderRow).join('') +
     `<div class="chain-foot">
-      Three-generation termination follows from K²-spectrum collapse at N=3
-      (not assumed). The 720 is the first-shell reduced-alphabet entropy;
-      the (2/7) is the orientation-summed singlet projection from the same
-      seven-state alphabet that fixed Ω<sub>tet</sub> = 1,680. <em>Zero parameters
-      fitted to lepton data.</em>
+      The 720 is the first-shell reduced-alphabet entropy and the (2/7) the
+      orientation-summed singlet projection from the same seven-state alphabet
+      that fixed Ω<sub>tet</sub> = 1,680. The same marked-vertex weight ζ* that
+      dresses L* supplies the last fraction of a percent here, through
+      different graph polynomials.
     </div>`;
   bodyEl.dataset.rendered = '1';
 }
