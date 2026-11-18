@@ -338,6 +338,11 @@ export class CosmicRegime extends Regime {
     this.viewH = h;
   }
 
+  hudNote(): string {
+    const p = this.progress();
+    return p < 1 ? ` · forming structure ${Math.round(p * 100)} %` : '';
+  }
+
   /** Fraction of the structure-formation run received so far (1 when complete). */
   progress(): number {
     if (!this.aKeys) return 0;

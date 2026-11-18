@@ -63,6 +63,8 @@ export abstract class Regime {
   abstract bloomStrength(ctx: RegimeContext): number;
   // Optional: paper-physics hover panel for the intersected object.
   hoverInfo(_intersection: THREE.Intersection): HoverInfo | null { return null; }
+  // Optional: a short note appended to the HUD's scale line (progress, caps).
+  hudNote(): string { return ''; }
   // Regimes that publish a focus child (e.g. COSMIC picks the focused
   // galaxy nearest the camera ray) override this. Called per frame for
   // continuous tracking, and once more at the moment of regime transition

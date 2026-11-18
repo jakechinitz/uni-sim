@@ -107,7 +107,11 @@ decorative, or open issue. In short:
   baryonic field (a stiff, near-radial director), so the tangential pull of
   bars and arms stays Newtonian. `a₀(z) = ε c H(z)` follows the epoch.
 - **Planetary systems** are Newtonian by the paper's carrier rule: a star
-  inside a galaxy has no response halo of its own.
+  inside a galaxy has no response halo of its own. Orbits run at the
+  labelled rate with distances to scale (1 AU = 29 scene units, `P² = a³/M`):
+  at Year/s a planet at 1 AU around a Sun-like star circles once a second.
+  Above 20 years per second the orbital rate is held so orbits stay visible.
+  Body sizes are not to scale.
 - **Black holes** use `N² = q`, `q = 1 − 2GM/c²r`, the Hawking temperature
   and the area entropy with `L_P = L*`. Their on-screen size is inflated;
   the numbers on the hover cards are real.

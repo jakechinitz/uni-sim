@@ -102,7 +102,7 @@ const GROUPS: Group[] = [
       {
         what: 'Gravity inside a star system', status: 'given',
         eq: 'Newtonian ·  Q₂^{⊙,⊥} = 0 ·  PPN γ = β = 1',
-        note: 'By the carrier rule a star inside a galaxy has no response halo of its own, so orbits here are Newtonian by rule and not only as a limit.',
+        note: 'By the carrier rule a star inside a galaxy has no response halo of its own, so orbits here are Newtonian by rule and not only as a limit. Orbits run at the labelled rate with distances to scale (1 AU = 29 scene units, P² = a³/M), held at 20 years per second so they stay visible. Body sizes are not to scale.',
       },
     ],
   },

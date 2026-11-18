@@ -423,7 +423,7 @@ export class App {
     const BANDS: Record<RegimeKey, [number, number, string]> = {
       COSMIC:    [25.5, 23.5, 'the cosmic web'],
       GALAXY:    [21.3, 20.0, 'a spiral galaxy'],
-      SYSTEM:    [13.3, 11.5, 'a planetary system'],
+      SYSTEM:    [12.5, 11.3, 'a planetary system'],   // 1 AU = 29 scene units
       ATOMIC:    [-8.5, -10.0, 'atoms · schematic'],
       SUBSTRATE: [-34.5, -35.0, 'the substrate lattice · schematic'],
     };
@@ -452,13 +452,6 @@ export class App {
       el.classList.toggle('ctx-off', regime === null || !(el.dataset.regimes ?? '').split(' ').includes(regime));
     });
     document.getElementById('hud-disclaimer')?.classList.toggle('hidden', regime !== 'GALAXY');
-  }
-
-  // While the structure-formation run is still streaming in, say so.
-  private webProgressNote(regime: RegimeKey): string {
-    if (regime !== 'COSMIC') return '';
-    const p = (this.regimes.current as unknown as { progress?: () => number }).progress?.();
-    return p !== undefined && p < 1 ? ` · forming structure ${Math.round(p * 100)} %` : '';
   }
 
   private loop = () => {
@@ -596,7 +589,7 @@ export class App {
       epoch: ep.label,
       scale: anchor
         ? `scene preset · ${anchor.meta.title} · paper ${anchor.meta.paperRef} · isolated demo, not to scale`
-        : this.scaleReadout(slice.regime, slice.intra, tGyr) + this.webProgressNote(slice.regime)
+        : this.scaleReadout(slice.regime, slice.intra, tGyr) + this.regimes.current.hudNote()
     });
 
     this.applyRegimeContext(anchor ? null : slice.regime);

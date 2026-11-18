@@ -5,4 +5,6 @@ import { installTooltips } from './ui/Tooltip';
 if (import.meta.env.DEV) runPhysicsSelfTest();
 
 installTooltips();
-new App();
+const app = new App();
+// Development builds expose the app for automated checks.
+if (import.meta.env.DEV) (window as unknown as { __unisim?: App }).__unisim = app;

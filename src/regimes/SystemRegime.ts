@@ -4,7 +4,7 @@
 // transverse halo of its own (§15–§16: Q₂^{⊙,⊥} = 0; PPN γ = β = 1).
 
 import * as THREE from 'three';
-import { Regime, RegimeContext, DragTarget } from './Regime';
+import { Regime, RegimeContext, DragTarget, HoverInfo } from './Regime';
 import { mulberry32 } from '../core/Rng';
 import { hashStr } from '../util/hash';
 import { radialGlow } from '../render/Glow';
@@ -33,6 +33,19 @@ interface PlanetView {
 
 const TRAIL = 256;
 
+// Physical scale of the scene. One astronomical unit is AU_SIM scene units,
+// which puts the innermost planet at roughly 0.9–1.1 AU. The time unit is
+// then fixed per system by Kepler's third law, P² = a³/M (years, AU, M☉):
+// the scene's own dynamics give P_sim = 2π √(a³ / (G_SIM·M_sim)), so one year
+// is 2π √(AU_SIM³·M☉ / (G_SIM·M_sim)) scene time units for this star.
+const AU_SIM = 29;
+const SECONDS_PER_YEAR = 3.156e7;
+// Orbits advance at the speed control's literal rate up to this many years
+// per wall-second. Beyond it the inner planets would circle many times per
+// frame and strobe, so the orbital rate holds here while cosmic time on the
+// HUD keeps running at the labelled rate.
+const MAX_YEARS_PER_SEC = 20;
+
 export class SystemRegime extends Regime {
   private starBody: Body;
   private starMesh: THREE.Sprite;
@@ -42,6 +55,13 @@ export class SystemRegime extends Regime {
   private fieldOpacity = 0;
   private time = 0;
   private wallTime = 0;
+  // Scene time units per year for this star (see AU_SIM), the star's initial
+  // scene mass, the innermost orbital period, and the current orbital rate.
+  private simPerYear = 1;
+  private starMass0 = 1;
+  private innerPeriodSim = 10;
+  private yearsPerSec = 0;
+  private rateCapped = false;
   private telegrapher = new TelegrapherField(30, new THREE.Color(0xffd9a0));
   private starLight!: THREE.PointLight;
   // Stellar lifecycle — drives the star's visual evolution at SYSTEM scale
@@ -155,6 +175,9 @@ export class SystemRegime extends Regime {
     this.scene.add(this.starMesh);
     this.draggable.add(this.starMesh);
     const STAR_MASS = starMass;
+    this.starMass0 = starMass;
+    this.simPerYear = 2 * Math.PI * Math.sqrt((AU_SIM ** 3 * this.starMassMsun) / (G_SIM * starMass));
+    this.innerPeriodSim = 2 * Math.PI * Math.sqrt(25 ** 3 / (G_SIM * starMass));
 
     // Planets
     for (let i = 0; i < N_PLANETS; i++) {
@@ -164,7 +187,12 @@ export class SystemRegime extends Regime {
       const r = a * (1 - e);
       const x = r * Math.cos(phase);
       const z = r * Math.sin(phase);
-      const v = Math.sqrt(G_SIM * STAR_MASS * (1 / r - 0.5 / a));
+      // vis-viva at pericentre: v² = GM (2/r − 1/a). (This used to be half
+      // that, which launched every planet at its apocentre on an accidental
+      // e ≈ 0.5 ellipse two-thirds the intended size.)
+      const v = Math.sqrt(G_SIM * STAR_MASS * (2 / r - 1 / a));
+      // Integration step is set by the innermost planet's pericentre passage.
+      if (i === 0) this.innerPeriodSim = 2 * Math.PI * Math.sqrt(a ** 3 / (G_SIM * STAR_MASS)) * Math.pow(1 - e, 1.5);
       const tx = -Math.sin(phase), tz = Math.cos(phase);
       const body: Body = {
         id: `p-${i}`,
@@ -269,7 +297,7 @@ export class SystemRegime extends Regime {
       this.beltPx[i] = r * Math.cos(ph);
       this.beltPz[i] = r * Math.sin(ph);
       this.beltPy[i] = (rng() - 0.5) * 2.2;         // thin vertical scatter
-      const v = Math.sqrt(G_SIM * STAR_MASS * (1 / r - 0.5 / a));
+      const v = Math.sqrt(G_SIM * STAR_MASS * (2 / r - 1 / a));     // vis-viva at pericentre
       this.beltVx[i] = -Math.sin(ph) * v;
       this.beltVz[i] =  Math.cos(ph) * v;
       beltPos[i * 3] = this.beltPx[i]; beltPos[i * 3 + 1] = this.beltPy[i]; beltPos[i * 3 + 2] = this.beltPz[i];
@@ -375,21 +403,38 @@ export class SystemRegime extends Regime {
   }
 
   update(ctx: RegimeContext, dt: number): void {
-    // Speed-aware visual integration step. visualRatePerWall maps the
-    // unified clock's literal sim_sec/wall_sec to a logarithmically
-    // capped visual rate, so chip presets (Year/s, Myr/s, Gyr/s)
-    // produce visibly distinct orbital advance instead of all
-    // saturating at the same per-frame cap.
-    const visPerWall = visualRatePerWall(ctx.rate);
-    const visDt = visPerWall * ctx.dtWall * Math.sign(ctx.rate || 1);
+    // Orbits run at the speed control's literal rate: at "1 yr/s" a planet at
+    // 1 AU around a 1 M☉ star circles once per second. ctx.rate is seconds
+    // of simulated time per wall-second.
+    const yrsWanted = Math.abs(ctx.rate) / SECONDS_PER_YEAR;
+    this.rateCapped = yrsWanted > MAX_YEARS_PER_SEC * 1.0001;
+    this.yearsPerSec = Math.min(yrsWanted, MAX_YEARS_PER_SEC) * Math.sign(ctx.rate || 1);
+    const orbDt = this.yearsPerSec * this.simPerYear * ctx.dtWall;
+    // Photons and wavefronts are effects, not orbits: they keep the compressed
+    // visual rate so they stay watchable at every preset.
+    const visDt = visualRatePerWall(ctx.rate) * ctx.dtWall * Math.sign(ctx.rate || 1);
     this.time += visDt;
     this.wallTime += ctx.dtWall;
-    const sub = Math.min(30, Math.max(2, Math.ceil(Math.abs(visDt) / 1.0)));
-    const dtSim = visDt / sub;
-    void dt;   // intentional: visDt now derived from ctx.rate, not raw dt
+    // Leapfrog step: at most 1/60 of the innermost orbital period.
+    const sub = Math.min(240, Math.max(1, Math.ceil(Math.abs(orbDt) / (this.innerPeriodSim / 60))));
+    const dtSim = orbDt / sub;
+    void dt;
     const bodies: Body[] = [this.starBody, ...this.planets.map(p => p.body)];
     for (let s = 0; s < sub; s++) {
       stepLeapfrog(bodies, dtSim, (i, all) => accelOnNewton(i, all, G_SIM));
+      // Trails are sampled by distance travelled, inside the substeps: a
+      // point every ~1/160 of an orbit. Sampling once per frame drew a
+      // jagged polygon whenever a planet covered a large arc in one frame.
+      for (const pv of this.planets) {
+        const tp = pv.trailPositions, o = (TRAIL - 1) * 3, b = pv.body.pos, st = this.starBody.pos;
+        const dx = b[0] - tp[o], dy = b[1] - tp[o + 1], dz = b[2] - tp[o + 2];
+        const r = Math.hypot(b[0] - st[0], b[1] - st[1], b[2] - st[2]);
+        const step = Math.max(0.2, r * (2 * Math.PI / 160));
+        if (dx * dx + dy * dy + dz * dz >= step * step) {
+          tp.copyWithin(0, 3, TRAIL * 3);
+          tp[o] = b[0]; tp[o + 1] = b[1]; tp[o + 2] = b[2];
+        }
+      }
     }
 
     // Belt + comets: test particles under the star's live two-body pull
@@ -517,11 +562,6 @@ export class SystemRegime extends Regime {
     for (const pv of this.planets) {
       pv.mesh.position.set(pv.body.pos[0], pv.body.pos[1], pv.body.pos[2]);
       if (pv.ring) pv.ring.rotation.z += visDt * 0.1;
-      const tp = pv.trailPositions;
-      tp.copyWithin(0, 3, TRAIL * 3);
-      tp[(TRAIL - 1) * 3 + 0] = pv.body.pos[0];
-      tp[(TRAIL - 1) * 3 + 1] = pv.body.pos[1];
-      tp[(TRAIL - 1) * 3 + 2] = pv.body.pos[2];
       const attr = pv.trail.geometry.attributes.position as THREE.BufferAttribute;
       attr.needsUpdate = true;
     }
@@ -619,6 +659,43 @@ export class SystemRegime extends Regime {
     const dist = this.remnant.position.distanceTo(cam) + 1e-3;
     const ndcR = Math.min(0.11, 2.6 / dist);
     return [{ worldPos: this.remnant.position, radius: ndcR }];
+  }
+
+  /** Shown in the HUD when the orbital rate is held below the speed control. */
+  hudNote(): string {
+    return this.rateCapped ? ` · orbits held at ${MAX_YEARS_PER_SEC} yr/s` : '';
+  }
+
+  hoverInfo(intersection: THREE.Intersection): HoverInfo | null {
+    const ud = intersection.object.userData;
+    const msun = this.starMassMsun * (this.starBody.mass / this.starMass0);
+    const rateRow = { k: 'orbital rate', v: this.yearsPerSec === 0 ? 'paused'
+      : `${Math.abs(this.yearsPerSec) < 0.01 ? Math.abs(this.yearsPerSec).toExponential(1) : Math.abs(this.yearsPerSec).toPrecision(3)} yr per second${this.rateCapped ? ' (held)' : ''}` };
+    if (ud?.type === 'planet') {
+      const b = this.planets[ud.index as number].body, st = this.starBody;
+      const rx = b.pos[0] - st.pos[0], ry = b.pos[1] - st.pos[1], rz = b.pos[2] - st.pos[2];
+      const vx = b.vel[0] - st.vel[0], vy = b.vel[1] - st.vel[1], vz = b.vel[2] - st.vel[2];
+      const r = Math.hypot(rx, ry, rz), v2 = vx * vx + vy * vy + vz * vz;
+      const inv = 2 / r - v2 / (G_SIM * st.mass);              // vis-viva: 1/a
+      if (!(inv > 0)) return { title: 'Planet · unbound', rows: [{ k: 'distance', v: `${(r / AU_SIM).toFixed(2)} AU` }, rateRow] };
+      const aAU = 1 / inv / AU_SIM, P = Math.sqrt(aAU ** 3 / Math.max(msun, 1e-6));
+      const rows = [
+        { k: 'semi-major axis', v: `${aAU.toFixed(2)} AU` },
+        { k: 'distance now', v: `${(r / AU_SIM).toFixed(2)} AU` },
+        { k: 'period', v: `${P < 10 ? P.toFixed(2) : P.toFixed(1)} yr` },
+        rateRow,
+      ];
+      if (this.yearsPerSec !== 0) {
+        const sec = P / Math.abs(this.yearsPerSec);
+        rows.push({ k: 'one orbit on screen', v: sec < 120 ? `${sec.toPrecision(3)} s` : sec < 7200 ? `${(sec / 60).toPrecision(3)} min` : `${(sec / 3600).toPrecision(3)} h` });
+      }
+      return { title: `Planet ${Number(ud.index) + 1}`, rows, note: 'Period from Kepler\'s third law, P² = a³/M. Gravity here is Newtonian by the paper\'s carrier rule. Planet sizes are not to scale.' };
+    }
+    if (ud?.type === 'star') {
+      return { title: 'Star', rows: [{ k: 'mass', v: `${msun.toFixed(2)} M☉` }, { k: 'main-sequence life', v: `${this.starLifetime < 1 ? (this.starLifetime * 1000).toFixed(0) + ' Myr' : this.starLifetime.toFixed(1) + ' Gyr'}` }, rateRow],
+        note: 'Drag to move. Distances are to scale at 1 AU = 29 scene units; the star and planets are drawn far larger than life.' };
+    }
+    return null;
   }
 
   pick(intersection: THREE.Intersection): DragTarget | null {
