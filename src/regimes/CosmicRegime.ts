@@ -20,7 +20,7 @@ import * as THREE from 'three';
 import { Regime, RegimeContext, DragTarget, FocusState, HoverInfo } from './Regime';
 import { radialGlow } from '../render/Glow';
 import { smoothstep } from '../util/lerp';
-import { a as scaleFactor, hubble, omegaMatterH2, checkpoints, OMEGA_M, LITTLE_H, STOCK_PER_BARYON } from '../core/Cosmology';
+import { a as scaleFactor, timeOfA, hubble, omegaMatterH2, checkpoints, OMEGA_M, LITTLE_H, STOCK_PER_BARYON } from '../core/Cosmology';
 import { makeGrowth } from '../core/LinearTheory';
 import { halfTable } from '../util/half';
 import { ManyPasts } from '../render/ManyPasts';
@@ -90,6 +90,7 @@ export class CosmicRegime extends Regime {
   private collapseB = 0.2;                      // 1/√(2(S_gal − S_cell))
   private collapseA = 1e3;                      // δ_c / D(a)
   private exposure = 1;
+  private aNow = 1;                             // scale factor at the current cosmic time
   private exposureFor = -1;                     // collapseA the exposure was last computed for
   private viewH = 800;
   // CPU mirror of tracer world positions / densities (filled on demand)
@@ -340,7 +341,14 @@ export class CosmicRegime extends Regime {
 
   hudNote(): string {
     const p = this.progress();
-    return p < 1 ? ` · forming structure ${Math.round(p * 100)} %` : '';
+    if (p < 1) return ` · forming structure ${Math.round(p * 100)} %`;
+    // The run covers the scale factor up to its last keyframe. Past that the
+    // comoving positions are held: structure has all but stopped growing by
+    // then anyway, as the vacuum dominates.
+    if (this.aKeys && this.aNow > this.aKeys[this.aKeys.length - 1] * 1.0005) {
+      return ` · web held: structure run ends at ${timeOfA(this.aKeys[this.aKeys.length - 1]).toFixed(1)} Gyr`;
+    }
+    return '';
   }
 
   /** Fraction of the structure-formation run received so far (1 when complete). */
@@ -495,6 +503,7 @@ export class CosmicRegime extends Regime {
 
     // ---- the web at cosmic time t ----
     const aNow = scaleFactor(t);
+    this.aNow = aNow;
     // Comoving view: the expansion is divided out so structure formation is
     // visible at every epoch. The HUD reports the physical scale (× a).
     this.scale = BOX;
