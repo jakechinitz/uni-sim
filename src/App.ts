@@ -442,12 +442,14 @@ export class App {
   }
 
   // Show only the controls that do something at the current scale.
-  private lastCtxRegime: RegimeKey | null = null;
-  private applyRegimeContext(regime: RegimeKey) {
+  // `null` = a scene preset is showing, where none of the scale-specific
+  // controls apply.
+  private lastCtxRegime: RegimeKey | null | undefined = undefined;
+  private applyRegimeContext(regime: RegimeKey | null) {
     if (regime === this.lastCtxRegime) return;
     this.lastCtxRegime = regime;
     document.querySelectorAll<HTMLElement>('[data-regimes]').forEach(el => {
-      el.classList.toggle('ctx-off', !(el.dataset.regimes ?? '').split(' ').includes(regime));
+      el.classList.toggle('ctx-off', regime === null || !(el.dataset.regimes ?? '').split(' ').includes(regime));
     });
     document.getElementById('hud-disclaimer')?.classList.toggle('hidden', regime !== 'GALAXY');
   }
@@ -587,15 +589,17 @@ export class App {
     const zLabel = isFinite(zR) ? (zR > 1000 ? `z ≈ ${zR.toExponential(2)}` : `z ≈ ${zR.toFixed(2)}`) : 'z ≈ ∞';
     setHud({
       time:  `${tLabel} · ${zLabel} · ${ep.label}`,
-      zoom:  `${slice.regime} ▸ ${slice.intra.toFixed(2)}`,
+      zoom:  anchor ? 'scene preset' : `${slice.regime} ▸ ${slice.intra.toFixed(2)}`,
       speed: this.clock.useLogPace
         ? `log-pace · ${this.clock.logPaceWallSec}s sweep`
         : formatRate(this.clock.speed),
       epoch: ep.label,
-      scale: this.scaleReadout(slice.regime, slice.intra, tGyr) + this.webProgressNote(slice.regime)
+      scale: anchor
+        ? `scene preset · ${anchor.meta.title} · paper ${anchor.meta.paperRef} · isolated demo, not to scale`
+        : this.scaleReadout(slice.regime, slice.intra, tGyr) + this.webProgressNote(slice.regime)
     });
 
-    this.applyRegimeContext(slice.regime);
+    this.applyRegimeContext(anchor ? null : slice.regime);
 
     // Substrate info panel — visible only at SUBSTRATE scale
     const spPanel = document.getElementById('substrate-panel');

@@ -7,13 +7,14 @@
 // the sound-horizon-inferred Hubble constant in the right direction.
 // The mode then dilutes through the dark ages.
 //
-// Visualization: a 3D "history rail" running left → right along the
-// X axis. Each cosmic epoch is a labeled ring; the χ-trace amplitude
-// plotted as a vertical excursion above the rail. A playhead sweeps
-// through cosmic time, lighting up each epoch as it passes. The
-// dormant radiation era reads as a flat baseline, the EDE pulse as a
-// dramatic spike at matter-rad equality, then a slow exponential
-// decay through the dark ages.
+// Visualization: a "history rail" running left → right along the X axis on
+// a log time axis. Each cosmic epoch is a labelled ring. Two curves rise
+// above the rail, both computed from core/Cosmology.ts:
+//   violet — the trace switch χ = ρ_m/(ρ_m + ρ_r): flat at zero through the
+//            radiation era, rising to 1 as matter takes over;
+//   orange — the early pulse's energy fraction, normalised to its peak
+//            (physically ≤ 1.8 %), which peaks near equality and fades.
+// A playhead sweeps through cosmic time, lighting each epoch as it passes.
 
 import * as THREE from 'three';
 import { Anchor, AnchorContext } from './Anchor';
@@ -21,14 +22,13 @@ import { traceChi, edePulse } from '../core/Cosmology';
 import { T_UNIV } from '../util/units';
 import { radialGlow } from '../render/Glow';
 
-// 8 paper-labelled epochs along the rail, log-spaced in cosmic time.
+// 7 paper-labelled epochs along the rail, log-spaced in cosmic time.
 // `lane` alternates the vertical position of the label so adjacent
 // labels can't overlap horizontally even when their tGyr values sit
 // within one decade of each other (which is most of the early
 // universe). lane 0 = below the rail, lane 1 = further below.
 const EPOCHS: { tGyr: number; label: string; lane: 0 | 1 }[] = [
   { tGyr: 1e-9,   label: 'Big Bang',     lane: 0 },
-  { tGyr: 1e-6,   label: 'Inflation',    lane: 1 },
   { tGyr: 1e-5,   label: 'Radiation',    lane: 0 },
   { tGyr: 5e-5,   label: 'EDE pulse',    lane: 1 },
   { tGyr: 3.8e-4, label: 'Recomb',       lane: 0 },
@@ -57,11 +57,13 @@ export class CosmologicalActivationAnchor extends Anchor {
       title: 'Cosmological activation · Hubble tension',
       paperRef: '§19',
       blurb:
-        'A 3D history rail of cosmic epochs. The trace-coupled scalar χ ' +
-        'is dormant during radiation (T^μ_μ = 0), spikes at matter-rad ' +
-        'equality (paper §19 EDE pulse), then dilutes through the dark ' +
-        'ages. The playhead sweeps cosmic time on a log scale; watch the ' +
-        'χ curve light up exactly at the equality crossing.',
+        'A history rail of cosmic epochs on a log time axis. Violet: the ' +
+        'trace switch χ = ρ_m/(ρ_m + ρ_r), zero in pure radiation ' +
+        '(T^μ_μ = 0) and rising to 1 once matter dominates. Orange: the ' +
+        'early pulse that this switch wakes, peaking near equality ' +
+        '(z ≈ 3400) at 1.8 % of the energy budget and then fading. Both ' +
+        'curves are computed from the integrated background; the pulse ' +
+        'is drawn normalised to its peak.',
       tier: 2
     }, aspect);
 

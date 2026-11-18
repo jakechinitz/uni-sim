@@ -134,12 +134,13 @@ export const ANCHORS: AnchorEntry[] = [
       title: 'Cosmological activation · Hubble tension',
       paperRef: '§19',
       blurb:
-        'A 3D history rail of cosmic epochs. The trace-coupled scalar χ ' +
-        'is dormant during radiation (T^μ_μ = 0), spikes at matter-rad ' +
-        'equality (paper §19 EDE pulse), then dilutes through the dark ' +
-        'ages. A playhead sweeps cosmic time on a log scale; the χ curve ' +
-        "lights up exactly where the paper's Hubble-tension mechanism " +
-        'turns on.',
+        'A history rail of cosmic epochs on a log time axis. Violet: the ' +
+        'trace switch χ = ρ_m/(ρ_m + ρ_r), zero in pure radiation ' +
+        '(T^μ_μ = 0) and rising to 1 once matter dominates. Orange: the ' +
+        'early pulse that this switch wakes, peaking near equality ' +
+        '(z ≈ 3400) at 1.8 % of the energy budget and then fading. Both ' +
+        'curves are computed from the integrated background; the pulse ' +
+        'is drawn normalised to its peak.',
       tier: 2
     },
     build: (aspect) => new CosmologicalActivationAnchor(aspect)

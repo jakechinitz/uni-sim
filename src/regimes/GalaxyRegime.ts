@@ -1807,10 +1807,10 @@ export class GalaxyRegime extends Regime {
           { k: 'M',        v: `${s.mass.toFixed(2)} M☉` },
           { k: 't_MS',     v: `${s.lifetime.toExponential(2)} Gyr` },
           { k: 'r (galactic)', v: `${r.toFixed(2)} sim` },
-          { k: 'v (RAR)',  v: `${v.toExponential(2)} sim/s` },
+          { k: 'v',        v: `${v.toExponential(2)} sim/s` },
           { k: 'birth',    v: `${s.birth.toFixed(3)} Gyr` },
         ],
-        note: 'Click to pin focus, then scroll zoom-in to drill into this star\'s planetary system. Orbital motion uses the paper\'s exponential RAR — Newton near the SMBH, deep-MOND at the outer disk.'
+        note: 'Click to pin focus, then scroll zoom-in to drill into this star\'s planetary system. Orbital motion follows the paper\'s response law: Newtonian near the centre, boosted toward √(a₀·g) in the outer disk.'
       };
     }
 

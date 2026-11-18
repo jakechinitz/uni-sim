@@ -13,7 +13,8 @@
 //
 // What is decorative: point colours and sizes, the luminosity-vs-density
 // mapping (matter parcels shine once their neighbourhood has collapsed), the
-// spherical cut out of the periodic box, and the plasma-era backdrop.
+// auto-exposure that keeps the young, faint universe readable, the spherical
+// cut out of the periodic box, and the plasma-era backdrop.
 
 import * as THREE from 'three';
 import { Regime, RegimeContext, DragTarget, FocusState, HoverInfo } from './Regime';
@@ -88,6 +89,8 @@ export class CosmicRegime extends Regime {
   private deltaLin: Float32Array | null = null;
   private collapseB = 0.2;                      // 1/√(2(S_gal − S_cell))
   private collapseA = 1e3;                      // δ_c / D(a)
+  private exposure = 1;
+  private exposureFor = -1;                     // collapseA the exposure was last computed for
   private viewH = 800;
   // CPU mirror of tracer world positions / densities (filled on demand)
   private pos: Float32Array | null = null;
@@ -235,12 +238,14 @@ export class CosmicRegime extends Regime {
         uTexW: { value: TEX_W }, uHalo: { value: halo ? 1 : 0 }, uCut: { value: CUT_R },
         uCollapse: { value: new THREE.Vector2(1e3, this.collapseB) },
         uGain: { value: Math.sqrt(131072 / nR) },
+        uExposure: { value: 1 },
       },
       vertexShader: /* glsl */`
         uniform sampler2D uA; uniform sampler2D uB;
         uniform float uMix, uScale, uPx, uLit, uTexW, uHalo, uCut;
         uniform vec2 uCollapse;                              // (δ_c / D(a), 1/√(2(S_gal − S_cell)))
         uniform float uGain;                                 // compensates for fewer drawn tracers
+        uniform float uExposure;                             // auto-exposure (decorative)
         attribute float aIdx; attribute vec2 aRnd; attribute float aDelta;
         varying vec3 vCol; varying float vAlpha;
         float erfc_(float x) {                               // Abramowitz & Stegun 7.1.26
@@ -275,7 +280,7 @@ export class CosmicRegime extends Regime {
           float px = uPx * size * mix(1.0, uGain, 0.35) / max(0.05, -mv.z);
           float fade = min(1.0, px / 1.6);
           gl_PointSize = clamp(px, 1.6, 96.0);
-          vAlpha = lum * edge * fade * uGain;
+          vAlpha = lum * edge * fade * uGain * uExposure;
         }`,
       fragmentShader: /* glsl */`
         varying vec3 vCol; varying float vAlpha;
@@ -337,6 +342,26 @@ export class CosmicRegime extends Regime {
   progress(): number {
     if (!this.aKeys) return 0;
     return this.done ? 1 : this.ready / this.aKeys.length;
+  }
+
+  // Auto-exposure, like a camera's: the early universe really is fainter
+  // (few parcels have collapsed, and before the first stars there is only
+  // gas), so the display gain rises to keep the young web readable. It is
+  // set from the mean brightness the shader will produce for a sample of
+  // tracers. Purely a display choice — the collapsed fractions are untouched.
+  private updateExposure() {
+    const A = this.collapseA, d = this.deltaLin;
+    if (!d || Math.abs(A - this.exposureFor) < 0.01 * A) return;
+    this.exposureFor = A;
+    const n = Math.min(d.length, 2048), B = this.collapseB;
+    let sum = 0;
+    for (let i = 0; i < n; i++) {
+      const x = (A - d[i]) * B, ax = Math.abs(x), t = 1 / (1 + 0.3275911 * ax);
+      const y = t * (0.254829592 + t * (-0.284496736 + t * (1.421413741 + t * (-1.453152027 + t * 1.061405429)))) * Math.exp(-ax * ax);
+      sum += Math.pow(Math.min(1, x >= 0 ? y : 2 - y), 0.55);
+    }
+    const meanLum = 0.03 + 0.6 * (sum / n);
+    this.exposure = Math.min(4.5, Math.max(1, 0.5 / meanLum));
   }
 
   // Fill the CPU mirror of world positions and densities for this frame.
@@ -427,36 +452,37 @@ export class CosmicRegime extends Regime {
     } else if (t < recomb * 0.9) {
       radIntensity = 1.0 - 0.5 * smoothstep(0, recomb * 0.9, t);
     } else if (t < recomb * 1.1) {
-      // "Fog clears" transition — from 0.5 down to the dark-ages floor (0.10)
-      radIntensity = 0.5 - 0.40 * smoothstep(recomb * 0.9, recomb * 1.1, t);
+      // "Fog clears" transition — from 0.5 down to the dark-ages floor
+      radIntensity = 0.5 - 0.43 * smoothstep(recomb * 0.9, recomb * 1.1, t);
     } else if (t < REIO) {
       // Dark ages baseline + small brightening as we approach reionization
       const x = smoothstep(recomb * 1.1, REIO, t);
-      radIntensity = 0.10 + 0.05 * x;
+      radIntensity = 0.07 + 0.05 * x;
     } else if (t < 0.8) {
       // Reionization era — gentle brightening peak as first stars+galaxies form
       const x = smoothstep(REIO, 0.4, t);
       const fade = 1 - smoothstep(0.4, 0.8, t);
-      radIntensity = 0.15 + 0.10 * x * fade;
+      radIntensity = 0.12 + 0.10 * x * fade;
     } else {
       // Long-term substrate floor: faint, ever-present capacity haze
       radIntensity = 0.06;
     }
     const radMat = this.radNoiseMesh.material as THREE.ShaderMaterial;
-    radMat.uniforms.intensity.value = radIntensity * (1 + 0.6 * ctx.edePulse);
+    // The early pulse is at most 1.8 % of the energy budget, so it only
+    // nudges the plasma glow. After recombination the backdrop is a faint
+    // blue haze and does not respond to it: with the integrated background
+    // the pulse's normalised amplitude lingers through recombination, and
+    // tinting by it turned the Dark Ages into a flat grey wash.
+    const cleared = smoothstep(recomb * 0.9, recomb * 1.6, t);     // 0 = plasma, 1 = transparent universe
+    radMat.uniforms.intensity.value = radIntensity * (1 + 0.6 * ctx.edePulse * (1 - cleared));
     // Radiation noise is pure visual ambiance — wall time, never freezes
     radMat.uniforms.time.value += ctx.dtWall;
-    // Tint warm in the plasma era, shifts cooler through dark ages →
-    // substrate background reads as "field" not "fire" once recombination
-    // is over. EDE pulse re-warms it transiently.
-    if (t < recomb * 1.1) {
+    // Warm in the plasma era, blending to cool blue as the fog clears.
+    {
+      const e = ctx.edePulse * (1 - cleared);
+      const wr = 1.0, wg = 0.55 + 0.15 * e, wb = 0.30 + 0.20 * e;
       radMat.uniforms.tint.value.setRGB(
-        1.0, 0.55 + 0.15 * ctx.edePulse, 0.30 + 0.20 * ctx.edePulse
-      );
-    } else {
-      // Cool substrate haze: dim blue-grey
-      radMat.uniforms.tint.value.setRGB(
-        0.55 + 0.45 * ctx.edePulse, 0.62 + 0.20 * ctx.edePulse, 0.78
+        wr + (0.34 - wr) * cleared, wg + (0.50 - wg) * cleared, wb + (0.86 - wb) * cleared
       );
     }
     // Inflation factor: starts huge after Big Bang, decays to 1 over ~1 sec
@@ -469,6 +495,7 @@ export class CosmicRegime extends Regime {
     this.scale = BOX;
     const Dnow = growth(Math.max(aNow, 1e-6));
     this.collapseA = 1.686 / Math.max(Dnow, 1e-4);          // spherical-collapse threshold over growth
+    this.updateExposure();
     // Mean collapsed fraction, for CPU-side "is anything lit yet" decisions.
     this.lit = smoothstep(checkpoints.T_FIRST_BH * 0.6, checkpoints.T_GALAXIES * 1.4, t);
     if (this.points && this.material && this.dKeys && this.ready >= 2) {
@@ -490,6 +517,7 @@ export class CosmicRegime extends Regime {
         mat.uniforms.uScale.value = this.scale;
         mat.uniforms.uPx.value = uPx;
         mat.uniforms.uLit.value = this.lit;
+        mat.uniforms.uExposure.value = this.exposure;
         (mat.uniforms.uCollapse.value as THREE.Vector2).set(this.collapseA, this.collapseB);
       }
       this.points.visible = true;

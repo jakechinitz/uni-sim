@@ -57,7 +57,7 @@ const GROUPS: Group[] = [
       },
       {
         what: 'Which parcels shine', status: 'decor',
-        note: 'Brightness follows each parcel\'s collapsed fraction at the retention-gate mass (extended Press–Schechter), with a display gamma. Colour, size and the spherical cut are for legibility.',
+        note: 'Brightness follows each parcel\'s collapsed fraction at the retention-gate mass (extended Press–Schechter), with a display gamma and a camera-style auto-exposure that brightens the young, faint universe. Colour, size and the spherical cut are for legibility.',
       },
     ],
   },

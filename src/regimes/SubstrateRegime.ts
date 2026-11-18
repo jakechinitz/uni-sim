@@ -12,7 +12,7 @@ import { TelegrapherField } from '../render/Telegrapher';
 import { formatSI, cellScrambling } from '../core/Closure';
 import { SubstrateSim, SimDefect, SUB_Q_SAT } from '../core/SubstrateSim';
 
-const N_TET   = 220;        // tetrahedra to render
+const TET_EXT = 4;          // lattice sites per side = 2·TET_EXT + 1 (9³ = 729 tetrahedra, minus the corners)
 const LATTICE_R = 14;
 const N_DEFECTS = 3;
 
@@ -64,10 +64,13 @@ export class SubstrateRegime extends Regime {
 
     // Build a jittered cubic lattice of tetrahedron centers
     const step = 2.2;
-    const ext = Math.ceil(Math.pow(N_TET, 1 / 3) / 2);
-    for (let i = -ext; i <= ext && this.tetras.length < N_TET; i++) {
-      for (let j = -ext; j <= ext && this.tetras.length < N_TET; j++) {
-        for (let k = -ext; k <= ext && this.tetras.length < N_TET; k++) {
+    // Fill the whole symmetric block. (This used to stop at a fixed count
+    // while looping x-first, which built only the −x slabs: the lattice
+    // covered just the left half of the view.)
+    const ext = TET_EXT;
+    for (let i = -ext; i <= ext; i++) {
+      for (let j = -ext; j <= ext; j++) {
+        for (let k = -ext; k <= ext; k++) {
           const x = i * step + (rng() - 0.5) * 0.6;
           const y = j * step + (rng() - 0.5) * 0.6;
           const z = k * step + (rng() - 0.5) * 0.6;
