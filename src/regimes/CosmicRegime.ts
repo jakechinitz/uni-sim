@@ -30,9 +30,11 @@ const BOX = 60;               // world units across the comoving box at a = 1
 const BOX_MPC_H = 200;        // comoving box side, h⁻¹Mpc
 const TEX_W = 256;            // keyframe texture width (tracers per row)
 const H100 = 0.1022712;       // 100 km/s/Mpc in 1/Gyr
-// Simulation size and number of rendered tracers per quality level.
+// Simulation size and number of rendered tracers per quality level. The run
+// itself is the same at every level (it is off the main thread); only the
+// number of points drawn changes, and each point is brightened to compensate.
 const LEVELS: Record<QualityLevel, { n: number; tracers: number }> = {
-  low:    { n: 32, tracers: 16384 },
+  low:    { n: 64, tracers: 32768 },
   medium: { n: 64, tracers: 65536 },
   high:   { n: 64, tracers: 131072 },
 };
@@ -232,11 +234,13 @@ export class CosmicRegime extends Regime {
         uScale: { value: BOX }, uPx: { value: 800 }, uLit: { value: 1 },
         uTexW: { value: TEX_W }, uHalo: { value: halo ? 1 : 0 }, uCut: { value: CUT_R },
         uCollapse: { value: new THREE.Vector2(1e3, this.collapseB) },
+        uGain: { value: Math.sqrt(131072 / nR) },
       },
       vertexShader: /* glsl */`
         uniform sampler2D uA; uniform sampler2D uB;
         uniform float uMix, uScale, uPx, uLit, uTexW, uHalo, uCut;
         uniform vec2 uCollapse;                              // (δ_c / D(a), 1/√(2(S_gal − S_cell)))
+        uniform float uGain;                                 // compensates for fewer drawn tracers
         attribute float aIdx; attribute vec2 aRnd; attribute float aDelta;
         varying vec3 vCol; varying float vAlpha;
         float erfc_(float x) {                               // Abramowitz & Stegun 7.1.26
@@ -268,10 +272,10 @@ export class CosmicRegime extends Regime {
           if (uHalo > 0.5) {                                 // committed-stock overlay
             size *= 5.0; lum = 0.035 * (0.3 * over + dens) * uLit; vCol = vec3(0.35, 0.8, 1.0);
           }
-          float px = uPx * size / max(0.05, -mv.z);
+          float px = uPx * size * mix(1.0, uGain, 0.35) / max(0.05, -mv.z);
           float fade = min(1.0, px / 1.6);
           gl_PointSize = clamp(px, 1.6, 96.0);
-          vAlpha = lum * edge * fade;
+          vAlpha = lum * edge * fade * uGain;
         }`,
       fragmentShader: /* glsl */`
         varying vec3 vCol; varying float vAlpha;

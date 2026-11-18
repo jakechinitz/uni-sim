@@ -9,6 +9,7 @@ import { z as cosmoZ, a as cosmoA, epoch as cosmoEpoch, edePulse } from './core/
 import { decodeZoom } from './core/Camera';
 import { bindUI, setHud, syncControls, updateAnchorPanel } from './ui/ui';
 import { bindClosurePanel } from './ui/Closure';
+import { bindTheoryPanel } from './ui/Theory';
 import { updateHoverCard, pinHoverCard, unpinHoverCard } from './ui/HoverCard';
 import { SaveData, autosave, emptySave, loadLocal } from './core/Store';
 import { DragController } from './core/Drag';
@@ -154,6 +155,7 @@ export class App {
     this.regimes.setZoom(this.state.zoom);
 
     bindClosurePanel();
+    bindTheoryPanel();
 
     bindUI({
       state: this.state,
@@ -439,6 +441,17 @@ export class App {
     return `view ≈ 10${sup} m · ${label}${frame}`;
   }
 
+  // Show only the controls that do something at the current scale.
+  private lastCtxRegime: RegimeKey | null = null;
+  private applyRegimeContext(regime: RegimeKey) {
+    if (regime === this.lastCtxRegime) return;
+    this.lastCtxRegime = regime;
+    document.querySelectorAll<HTMLElement>('[data-regimes]').forEach(el => {
+      el.classList.toggle('ctx-off', !(el.dataset.regimes ?? '').split(' ').includes(regime));
+    });
+    document.getElementById('hud-disclaimer')?.classList.toggle('hidden', regime !== 'GALAXY');
+  }
+
   // While the structure-formation run is still streaming in, say so.
   private webProgressNote(regime: RegimeKey): string {
     if (regime !== 'COSMIC') return '';
@@ -577,6 +590,8 @@ export class App {
       epoch: ep.label,
       scale: this.scaleReadout(slice.regime, slice.intra, tGyr) + this.webProgressNote(slice.regime)
     });
+
+    this.applyRegimeContext(slice.regime);
 
     // Substrate info panel — visible only at SUBSTRATE scale
     const spPanel = document.getElementById('substrate-panel');
